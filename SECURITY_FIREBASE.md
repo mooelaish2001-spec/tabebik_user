@@ -46,3 +46,10 @@ Firebase transport encryption and at-rest encryption are platform protections, n
 4. Write allow rules for the separated schema and storage paths.
 5. Add Firebase Emulator tests for unauthenticated, patient owner, assigned doctor, unrelated doctor, center manager, reception and admin.
 6. Deploy only after all tests pass and a security review confirms no cross-role reads/writes.
+
+
+## 2026-11 schema migration work (client API stage)
+- The shared Firebase helper now has an operational-booking allowlist. It rejects unknown keys (including complaint and health payloads) and requires the signed-in UID to match patientUid.
+- A separate medical-private write API requires an authenticated patient, explicit consent flag, and doctor UID; it stores the medical payload under bookings/{bookingId}/private/medical with patientUid/doctorUid metadata.
+- A revocation-request helper writes a patient-doctor grant revocation request.
+- IMPORTANT: these client helpers are preparatory only. Current Firestore rules intentionally deny booking/private/grant writes, and the main.dart booking flows still need to be migrated away from direct Firestore writes. Do not deploy or treat this as production-ready until backend authorization, consent grant lifecycle, encryption, rules and emulator tests are completed.
