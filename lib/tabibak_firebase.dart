@@ -264,8 +264,24 @@ class Fb {
     }, SetOptions(merge: true));
   }
 
-  /// تعديل جزئي. المفاتيح المتداخلة بالنقطة مسموحة: {'pay.state': 'sent'}.
-  static Future<void> updateBooking(String id, Map<String, dynamic> patch) => _db.collection('bookings').doc(id).update({...patch, 'updatedAt': FieldValue.serverTimestamp()});
+  /// تحديث محدود لحقول تشغيلية فقط. يمنع تمرير بيانات طبية أو حقول هوية/صلاحيات.
+  /// يجب أن تفرض Firestore Rules صلاحية الدور والملكية أيضاً؛ هذا الفحص ليس بديلاً عنها.
+  static const Set<String> _bookingUpdateKeys = {
+    'status', 'pay', 'pay.state', 'pay.info', 'pay.receiptUrl',
+    'arrived', 'visit', 'price'
+  };
+
+  static Future<void> updateBooking(String id, Map<String, dynamic> patch) async {
+    if (patch.isEmpty) throw ArgumentError('Booking update cannot be empty.');
+    final forbidden = patch.keys.where((key) => !_bookingUpdateKeys.contains(key)).toList();
+    if (forbidden.isNotEmpty) {
+      throw ArgumentError('Unsupported booking update fields: ${forbidden.join(', ')}');
+    }
+    await _db.collection('bookings').doc(id).update({
+      ...patch,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
 
   /// وثائق خاصة داخل الحجز (bookings/{id}/private/{name}): الملف الصحي الذي شاركه المريض — يقرؤه المريض والطبيب فقط (لا المركز).
   @Deprecated('Use putBookingMedicalPrivate with explicit consent and doctor UID.')
