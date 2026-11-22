@@ -268,7 +268,10 @@ class Fb {
   static Future<void> updateBooking(String id, Map<String, dynamic> patch) => _db.collection('bookings').doc(id).update({...patch, 'updatedAt': FieldValue.serverTimestamp()});
 
   /// وثائق خاصة داخل الحجز (bookings/{id}/private/{name}): الملف الصحي الذي شاركه المريض — يقرؤه المريض والطبيب فقط (لا المركز).
-  static Future<void> putBookingPrivate(String id, String name, Map<String, dynamic> m) => _db.collection('bookings').doc(id).collection('private').doc(name).set(m);
+  @Deprecated('Use putBookingMedicalPrivate with explicit consent and doctor UID.')
+  static Future<void> putBookingPrivate(String id, String name, Map<String, dynamic> m) async {
+    throw StateError('Unscoped private booking writes are disabled. Use the consent-aware medical API.');
+  }
 
   static Future<Map<String, dynamic>?> bookingPrivate(String id, String name) async {
     final d = await _db.collection('bookings').doc(id).collection('private').doc(name).get();
