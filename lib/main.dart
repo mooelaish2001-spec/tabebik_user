@@ -1479,15 +1479,14 @@ class Appt {
   String get code => 'TB-${20400 + id}';
   IconData get icon => const [Icons.medical_services_rounded, Icons.bed_rounded, Icons.vaccines_rounded, Icons.science_rounded][kind];
 
-  /// الحمولة التي تصل إلى المركز والطبيب عند الربط بالخادم.
-  /// مفاتيحها مطابقة لحقول Patient.fromPlatform في تطبيق الطبيب (name · age · female · phone · timeMin · place · complaint ·
-  /// conditions · allergies · meds · surgeries · transfusion · admission) ولحقول Booking في تطبيق المركز (type · svc · when · price · status).
+  /// حمولة تشغيلية فقط للمركز: لا تُرسل الشكوى أو الملف الصحي ضمن وثيقة الحجز.
+  /// لا نشارك بيانات طبية حتى يتوفر doctorUid موثوق وموافقة يعالجها الخادم.
   Map<String, dynamic> toPlatform() {
     final self = who.isEmpty || who == app.name;
     final isHome = kind == 2;
     return {
       'code': code,
-      'type': kind == 3 ? 2 : kind, // 0 طبيب · 1 سرير · 2 خدمة منزلية (زيارة طبيب/تمريض/معمل)
+      'type': kind == 3 ? 2 : kind,
       'svc': kind == 3 ? 2 : (isHome && title.contains('تمريض') ? 1 : 0),
       'centerId': centerId,
       'doctorLic': doctor?.reg ?? '',
@@ -1501,8 +1500,6 @@ class Appt {
       'place': place,
       'price': price,
       'status': kToCenterStatus[status] ?? 'جديد',
-      'complaint': complaint,
-      if (sharedHealth) ...app.health.toPlatform(),
     };
   }
 }
