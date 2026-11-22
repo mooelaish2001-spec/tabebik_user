@@ -1744,7 +1744,6 @@ class AppState extends ChangeNotifier {
         ...a.toPlatform(),
         'patientUid': user.uid,
         'patientPhone': user.phoneNumber ?? phone,
-        'doctorLicense': a.doctor?.reg ?? '',
         'patientName': name,
         'bookingId': ref.id,
         'createdAt': FieldValue.serverTimestamp(),
