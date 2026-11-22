@@ -96,6 +96,26 @@ const kWeek = ['الاثنين', 'الثلاثاء', 'الأربعاء', 'الخ
 const kMonths = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
 String dayLabel(DateTime d) => '${kWeek[d.weekday - 1]} ${d.day} ${kMonths[d.month - 1]}';
 
+/// يحوّل اليوم المختار من صيغة العرض إلى تاريخ ISO. الخيارات في SchedulePicker
+/// محصورة بالأيام السبعة القادمة؛ نختار السنة التي تجعل التاريخ أقرب موعد مستقبلي.
+String? dayLabelToIso(String label, {DateTime? now}) {
+  final parts = label.trim().split(RegExp(r'\\s+'));
+  if (parts.length != 3) return null;
+  final day = int.tryParse(parts[1]);
+  final month = kMonths.indexOf(parts[2]) + 1;
+  if (day == null || month < 1 || day < 1 || day > 31) return null;
+  final base = now ?? DateTime.now();
+  DateTime? selected;
+  for (final year in [base.year, base.year + 1]) {
+    final candidate = DateTime(year, month, day);
+    if (candidate.year != year || candidate.month != month || candidate.day != day) continue;
+    final delta = candidate.difference(DateTime(base.year, base.month, base.day)).inDays;
+    if (delta >= 0 && delta <= 8 && (selected == null || candidate.isBefore(selected))) selected = candidate;
+  }
+  if (selected == null) return null;
+  return '${selected.year}-${selected.month.toString().padLeft(2, '0')}-${selected.day.toString().padLeft(2, '0')}';
+}
+
 void snack(BuildContext c, String m, {bool ok = false}) {
   final sm = ScaffoldMessenger.of(c);
   sm.hideCurrentSnackBar();
@@ -1496,6 +1516,7 @@ class Appt {
       'female': self ? app.gender == 'أنثى' : false,
       'title': title,
       'when': '$day · $time',
+      'dateIso': dayLabelToIso(day) ?? '',
       'timeMin': parseTime(time) ?? 0,
       'place': place,
       'price': price,
