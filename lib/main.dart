@@ -99,7 +99,7 @@ String dayLabel(DateTime d) => '${kWeek[d.weekday - 1]} ${d.day} ${kMonths[d.mon
 /// يحوّل اليوم المختار من صيغة العرض إلى تاريخ ISO. الخيارات في SchedulePicker
 /// محصورة بالأيام السبعة القادمة؛ نختار السنة التي تجعل التاريخ أقرب موعد مستقبلي.
 String? dayLabelToIso(String label, {DateTime? now}) {
-  final parts = label.trim().split(RegExp(r'\\s+'));
+  final parts = label.trim().split(RegExp(r'\s+'));
   if (parts.length != 3) return null;
   final day = int.tryParse(parts[1]);
   final month = kMonths.indexOf(parts[2]) + 1;
