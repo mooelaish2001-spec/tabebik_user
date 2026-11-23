@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/cupertino.dart' show CupertinoPicker;
 import 'tabibak_firebase.dart';
+import 'passkey_auth_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -2935,52 +2936,6 @@ String fmtTime(int m) {
 const kDemoData = bool.fromEnvironment('DEMO_DATA', defaultValue: true);
 
 /// يعرض رمز التحقق على الشاشة (لا SMS فعلية في هذه النسخة). للإنتاج: --dart-define=DEMO_OTP=false
-const kDemoOtp = bool.fromEnvironment('DEMO_OTP', defaultValue: true);
-
-// ───────────────────────── رمز التحقق (OTP) ─────────────────────────
-class _OtpEntry {
-  _OtpEntry(this.code) : at = DateTime.now();
-  final String code;
-  final DateTime at;
-  int tries = 0;
-}
-
-/// نموذج محلي لرمز التحقق — نفس سلوك تطبيقَي الطبيب والمركز (6 أرقام · 5 دقائق · 5 محاولات).
-/// في الإنتاج: الخادم يولّد الرمز ويرسله بـ SMS ولا يعيده للتطبيق أبداً، ويتحقق منه ويحدّ الإرسال لكل رقم.
-class OtpService {
-  final _m = <String, _OtpEntry>{};
-  static const maxTries = 5;
-  static const ttl = Duration(minutes: 5);
-
-  String send(String phone) {
-    final code = (100000 + math.Random.secure().nextInt(900000)).toString();
-    _m[phone] = _OtpEntry(code);
-    return code;
-  }
-
-  /// يرجع null عند النجاح، وإلا رسالة الخطأ.
-  String? check(String phone, String code) {
-    final o = _m[phone];
-    if (o == null) return 'اطلب رمزاً جديداً أولاً';
-    if (DateTime.now().difference(o.at) > ttl) {
-      _m.remove(phone);
-      return 'انتهت صلاحية الرمز، اطلب رمزاً جديداً';
-    }
-    o.tries++;
-    if (o.code != code) {
-      if (o.tries >= maxTries) {
-        _m.remove(phone);
-        return 'تجاوزت عدد المحاولات، اطلب رمزاً جديداً';
-      }
-      return 'الرمز غير صحيح (${maxTries - o.tries} محاولات متبقية)';
-    }
-    _m.remove(phone);
-    return null;
-  }
-}
-
-final otp = OtpService();
-
 // ───────────────────────── تخزين الجهاز (تسجيل مرة واحدة كالواتساب) ─────────────────────────
 abstract class StoreBackend {
   String? read(String key);
@@ -3155,22 +3110,78 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginState extends State<LoginScreen> {
   final ph = TextEditingController();
+  final nm = TextEditingController();
   String? err;
+  bool busy = false;
 
   @override
   void dispose() {
     ph.dispose();
+    nm.dispose();
     super.dispose();
   }
 
-  void send() {
-    final n = normPhone(ph.text);
-    if (n == null) {
-      setState(() => err = 'أدخل رقم هاتف سوداني صحيح (مثال: 912345678)');
+  Future<void> register() async {
+    if (busy) return;
+    final phone = normPhone(ph.text);
+    final name = nm.text.trim();
+    if (phone == null) {
+      setState(() => err = 'أدخل رقم هاتف سوداني صحيح للتواصل معك.');
       return;
     }
-    setState(() => err = null);
-    go(context, OtpScreen(n));
+    if (name.length < 3) {
+      setState(() => err = 'اكتب اسمك (3 حروف على الأقل).');
+      return;
+    }
+    if (!Fb.on) {
+      setState(() => err = 'الاتصال بخدمة الحسابات غير متاح حالياً. حاول عند توفر الإنترنت.');
+      return;
+    }
+    setState(() {
+      busy = true;
+      err = null;
+    });
+    try {
+      await PasskeyAuthService().registerPatient(displayName: name);
+      app.createAccount(phone, name);
+      app.ping();
+      if (mounted) {
+        snack(context, 'تم إنشاء الحساب بالمفتاح بنجاح', ok: true);
+        home(context);
+      }
+    } catch (e) {
+      if (mounted) setState(() => err = e is PasskeyAuthException ? e.message : 'تعذر إنشاء الحساب. تأكد من اتصال الإنترنت وإعداد قفل الجهاز.');
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> signIn() async {
+    if (busy) return;
+    if (!Fb.on) {
+      setState(() => err = 'الاتصال بخدمة الحسابات غير متاح حالياً. حاول عند توفر الإنترنت.');
+      return;
+    }
+    setState(() {
+      busy = true;
+      err = null;
+    });
+    try {
+      await PasskeyAuthService().signIn();
+      final found = await app.afterSignIn();
+      if (!found) {
+        await Fb.signOut();
+        throw const PasskeyAuthException('لم نعثر على ملف حسابك. أنشئ حساباً جديداً أو تواصل مع الدعم.');
+      }
+      if (mounted) {
+        snack(context, 'تم تسجيل الدخول', ok: true);
+        home(context);
+      }
+    } catch (e) {
+      if (mounted) setState(() => err = e is PasskeyAuthException ? e.message : 'تعذر تسجيل الدخول بالمفتاح. تأكد من اختيار المفتاح المرتبط بحسابك.');
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
   }
 
   @override
@@ -3182,12 +3193,21 @@ class _LoginState extends State<LoginScreen> {
             child: ListView(padding: const EdgeInsets.fromLTRB(24, 24, 24, 16), children: [
               Center(child: Text('أهلاً بك في طبيبك', style: t(22))),
               gap(6),
-              Center(child: Text('سجّل رقم هاتفك مرة واحدة فقط، وبعدها يفتح التطبيق مباشرة على هذا الجهاز بدون تسجيل دخول.', textAlign: TextAlign.center, style: t(13, w: FontWeight.w500, c: kGrey, h: 1.7))),
-              AppField('رقم الهاتف', controller: ph, hint: '9XX XXX XXX', icon: Icons.phone_outlined, type: TextInputType.phone, ltr: true, prefixText: '+249  ', fmt: [digitsFmt, LengthLimitingTextInputFormatter(14)], error: err, onChanged: (_) {
-                if (err != null) setState(() => err = null);
-              }),
-              gap(20),
-              RedButton('موافقة ومتابعة', arrow: true, onTap: send),
+              Center(child: Text('أنشئ حسابك بمفتاح مرور. تستخدم بصمة الإصبع أو الوجه أو رمز قفل جهازك، دون رسائل SMS أو OTP.', textAlign: TextAlign.center, style: t(13, w: FontWeight.w500, c: kGrey, h: 1.7))),
+              gap(16),
+              AppField('الاسم', controller: nm, hint: 'مثال: أحمد محمد علي', icon: Icons.person_outline_rounded),
+              gap(10),
+              AppField('رقم الهاتف للتواصل', controller: ph, hint: '9XX XXX XXX', icon: Icons.phone_outlined, type: TextInputType.phone, ltr: true, prefixText: '+249  ', fmt: [digitsFmt, LengthLimitingTextInputFormatter(14)]),
+              gap(8),
+              Text('رقم الهاتف يُحفظ للتواصل معك، ولا يتم التحقق منه برسالة SMS.', style: t(11, w: FontWeight.w500, c: kGrey)),
+              if (err != null) ...[
+                gap(12),
+                Text(err!, textAlign: TextAlign.center, style: t(12, c: kRed)),
+              ],
+              gap(18),
+              RedButton('إنشاء حساب بمفتاح مرور', icon: Icons.fingerprint_rounded, arrow: true, loading: busy, onTap: register),
+              gap(12),
+              OutBtn('لدي حساب — الدخول بالمفتاح', icon: Icons.lock_open_rounded, onTap: busy ? () {} : signIn),
               gap(12),
               OutBtn('المتابعة كزائر', onTap: () => home(context)),
               gap(18),
@@ -3200,185 +3220,6 @@ class _LoginState extends State<LoginScreen> {
         ]),
       );
 }
-
-class OtpScreen extends StatefulWidget {
-  const OtpScreen(this.phone, {super.key});
-  final String phone; // +249XXXXXXXXX (normPhone)
-  @override
-  State<OtpScreen> createState() => _OtpState();
-}
-
-class _OtpState extends State<OtpScreen> {
-  static const len = 6;
-  final cs = List.generate(len, (_) => TextEditingController());
-  final fs = List.generate(len, (_) => FocusNode());
-  int left = 45;
-  Timer? timer;
-  String? err;
-  bool busy = false;
-  String demoCode = '';
-
-  @override
-  void initState() {
-    super.initState();
-    _send();
-    timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (left > 0 && mounted) setState(() => left--);
-    });
-  }
-
-  /// Firebase: رسالة SMS حقيقية. الوضع التجريبي: رمز يظهر على الشاشة.
-  void _send() {
-    if (Fb.on) {
-      Fb.sendCode(widget.phone, onSent: () {}, onError: (m) {
-        if (mounted) setState(() => err = m);
-      }, onAuto: () {
-        if (mounted) _done();
-      });
-    } else {
-      demoCode = otp.send(widget.phone);
-    }
-  }
-
-  Future<void> _done() async {
-    busy = true;
-    final existing = await app.afterSignIn();
-    if (!mounted) return;
-    if (existing) {
-      snack(context, 'أهلاً بعودتك ${app.first}', ok: true);
-      home(context);
-    } else {
-      Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => NameScreen(widget.phone)), (r) => false);
-    }
-  }
-
-  @override
-  void dispose() {
-    timer?.cancel();
-    for (final c in cs) {
-      c.dispose();
-    }
-    for (final f in fs) {
-      f.dispose();
-    }
-    super.dispose();
-  }
-
-  Future<void> verify() async {
-    if (busy) return;
-    final code = cs.map((c) => latin(c.text)).join();
-    if (code.length != len) {
-      setState(() => err = 'أدخل الرمز المكوّن من $len أرقام');
-      return;
-    }
-    if (Fb.on) {
-      setState(() => busy = true);
-      final fe = await Fb.verify(code);
-      if (fe != null) {
-        if (mounted) {
-          setState(() {
-            err = fe;
-            busy = false;
-          });
-        }
-        return;
-      }
-      await _done();
-      return;
-    }
-    final e = otp.check(widget.phone, code);
-    if (e != null) {
-      setState(() => err = e);
-      return;
-    }
-    busy = true;
-    final saved = userDir[widget.phone];
-    if (saved != null) {
-      // رقم مسجَّل سابقاً (جهاز جديد أو إعادة تثبيت): نستعيد حسابه.
-      app.loadJson(saved);
-      app.ping();
-      snack(context, 'أهلاً بعودتك ${app.first}', ok: true);
-      home(context);
-    } else {
-      // رقم جديد: اسمك ثم ملفك الصحي (اختياري).
-      Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => NameScreen(widget.phone)), (r) => false);
-    }
-  }
-
-  void resend() {
-    if (left > 0) return;
-    setState(() {
-      left = 45;
-      err = null;
-    });
-    _send();
-    for (final c in cs) {
-      c.clear();
-    }
-    fs[0].requestFocus();
-    snack(context, 'تم إرسال رمز جديد', ok: true);
-  }
-
-  @override
-  Widget build(BuildContext context) => RedPage(
-        title: 'رمز التحقق',
-        bottomBar: btnBar(context, 'تأكيد', verify),
-        body: ListView(padding: const EdgeInsets.all(24), children: [
-          gap(6),
-          Center(child: gTile(Icons.verified_user_rounded, size: 78)),
-          gap(16),
-          Center(child: Text('أدخل رمز التحقق', style: t(20))),
-          gap(6),
-          Center(child: Text('أرسلنا رمزاً من $len أرقام إلى', style: t(13, w: FontWeight.w500, c: kGrey))),
-          Center(child: Directionality(textDirection: TextDirection.ltr, child: Text(fmtPhone(widget.phone), style: t(15, c: kInk)))),
-          gap(24),
-          Directionality(
-            textDirection: TextDirection.ltr,
-            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              for (var i = 0; i < len; i++)
-                Container(
-                  width: 46,
-                  height: 60,
-                  margin: const EdgeInsets.symmetric(horizontal: 4),
-                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: err != null ? kRed : kLine, width: 1.5), boxShadow: kShadow),
-                  child: TextField(
-                    controller: cs[i],
-                    focusNode: fs[i],
-                    textAlign: TextAlign.center,
-                    keyboardType: TextInputType.number,
-                    maxLength: 1,
-                    inputFormatters: [digitsFmt],
-                    style: t(22),
-                    decoration: const InputDecoration(border: InputBorder.none, counterText: ''),
-                    onChanged: (v) {
-                      if (err != null) setState(() => err = null);
-                      if (v.isNotEmpty && i < len - 1) fs[i + 1].requestFocus();
-                      if (v.isEmpty && i > 0) fs[i - 1].requestFocus();
-                      if (v.isNotEmpty && i == len - 1) verify();
-                    },
-                  ),
-                ),
-            ]),
-          ),
-          if (err != null) Padding(padding: const EdgeInsets.only(top: 10), child: Center(child: Text(err!, style: t(12, c: kRed)))),
-          gap(20),
-          Center(
-            child: left > 0
-                ? Text.rich(TextSpan(text: 'إعادة إرسال الرمز بعد ', style: t(12.5, w: FontWeight.w500, c: kGrey), children: [TextSpan(text: '00:${left.toString().padLeft(2, '0')}', style: t(12.5, c: kRed))]))
-                : Tap(onTap: resend, child: Padding(padding: const EdgeInsets.all(8), child: Text('إعادة إرسال الرمز', style: t(13.5, c: kRed)))),
-          ),
-          if (kDemoOtp && !Fb.on) ...[
-            gap(14),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: kAmberBg, borderRadius: BorderRadius.circular(14)),
-              child: Text('وضع تجريبي: لا تُرسَل رسالة SMS فعلية.\nرمز التحقق: $demoCode', textAlign: TextAlign.center, style: t(12.5, c: kAmber, h: 1.7)),
-            ),
-          ],
-        ]),
-      );
-}
-
 /// أول مرة فقط: الاسم (مطلوب) والجنس وتاريخ الميلاد (اختياريان) — ثم يُنشأ الحساب ويُحفظ على الجهاز.
 class NameScreen extends StatefulWidget {
   const NameScreen(this.phone, {super.key});
