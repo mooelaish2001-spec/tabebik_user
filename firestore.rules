@@ -268,7 +268,7 @@ service cloud.firestore {
           || activeMembership(request.resource.data.doctorLic, request.resource.data.centerId)
         )
         && request.resource.data.status in ['جديد', 'قيد التأكيد']
-        && request.resource.data.pay.state == 'none'
+        && request.resource.data.pay.state in ['none', 'later']
         && request.resource.data.sharedHealth is bool;
 
       allow read: if canReadBooking(resource.data);
