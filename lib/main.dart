@@ -3111,6 +3111,7 @@ class LoginScreen extends StatefulWidget {
 class _LoginState extends State<LoginScreen> {
   final ph = TextEditingController();
   final nm = TextEditingController();
+  final passkey = PasskeyAuthService();
   String? err;
   bool busy = false;
 
@@ -3118,6 +3119,7 @@ class _LoginState extends State<LoginScreen> {
   void dispose() {
     ph.dispose();
     nm.dispose();
+    passkey.close();
     super.dispose();
   }
 
@@ -3142,7 +3144,7 @@ class _LoginState extends State<LoginScreen> {
       err = null;
     });
     try {
-      await PasskeyAuthService().registerPatient(displayName: name);
+      await passkey.registerPatient(displayName: name);
       app.createAccount(phone, name);
       app.ping();
       if (mounted) {
@@ -3167,7 +3169,7 @@ class _LoginState extends State<LoginScreen> {
       err = null;
     });
     try {
-      await PasskeyAuthService().signIn();
+      await passkey.signIn();
       final found = await app.afterSignIn();
       if (!found) {
         await Fb.signOut();
