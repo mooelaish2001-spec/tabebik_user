@@ -91,10 +91,10 @@ function assertPayload(value, max = 100) {
   return typeof value === "string" && value.trim().length > 0 && value.length <= max;
 }
 
-async function saveChallenge({ challenge, uid, type, app, displayName = "" }) {
+async function saveChallenge({ challenge, uid, type, app, displayName = "", phone = "", professionalId = "" }) {
   const ref = db.collection("passkeyChallenges").doc(challenge);
   await ref.create({
-    challenge, uid, type, app, displayName,
+    challenge, uid, type, app, displayName, phone, professionalId,
     createdAt: FieldValue.serverTimestamp(),
     expiresAt: Timestamp.fromMillis(Date.now() + CHALLENGE_TTL_MS),
     consumed: false,
@@ -122,10 +122,21 @@ export const passkeyRegisterOptions = onRequest({ region: REGION, cors: false, m
     if (!validPost(req, res)) return;
     const app = getApp(req);
     const displayName = String(req.body?.displayName ?? "").trim();
+    const phone = String(req.body?.phone ?? "").trim();
+    const professionalId = String(req.body?.professionalId ?? "").trim();
     if (!app || !assertPayload(displayName, 80)) return send(res, 400, { error: "invalid-registration-data" });
-    // New public self-registration is patient-only. Professional accounts require
-    // a separately verified licence/centre approval workflow before linking.
-    if (app !== "tabebik_user") return send(res, 403, { error: "professional-verification-required" });
+    if (app !== "tabebik_user" && !assertPayload(phone, 20)) return send(res, 400, { error: "phone-required" });
+    if (app === "tabebik_doctor" && !/^\\d{3,8}$/.test(professionalId)) return send(res, 400, { error: "council-number-required" });
+    if (app === "tabebik_center" && !assertPayload(professionalId, 80)) return send(res, 400, { error: "center-registration-required" });
+    // Never allow a passkey-only user to take over a pre-existing professional
+    // record created by a center. Those claims require a manual identity review.
+    if (app === "tabebik_doctor") {
+      const [key, doctor] = await Promise.all([
+        db.collection("doctorKeys").doc(professionalId).get(),
+        db.collection("doctors").doc(professionalId).get(),
+      ]);
+      if (key.exists || doctor.exists) return send(res, 409, { error: "professional-account-claim-required" });
+    }
     if (!(await rateLimit(req, "register", 5, 60 * 60 * 1000))) return send(res, 429, { error: "rate-limited" });
 
     const uid = randomUUID();
@@ -144,7 +155,7 @@ export const passkeyRegisterOptions = onRequest({ region: REGION, cors: false, m
       },
       timeout: CHALLENGE_TTL_MS,
     });
-    await saveChallenge({ challenge: options.challenge, uid, type: "registration", app, displayName });
+    await saveChallenge({ challenge: options.challenge, uid, type: "registration", app, displayName, phone, professionalId });
     return send(res, 200, { uid, options });
   } catch (error) {
     console.error("passkeyRegisterOptions failed", error);
@@ -204,8 +215,10 @@ export const passkeyRegisterVerify = onRequest({ region: REGION, cors: false, ma
       });
       tx.create(accountRef, {
         uid: challengeData.uid,
-        role: "patient",
+        role: app === "tabebik_user" ? "patient" : app === "tabebik_doctor" ? "doctor" : "center",
         displayName: String(challengeData.displayName ?? "").trim().slice(0, 80),
+        phone: String(challengeData.phone ?? ""),
+        professionalId: String(challengeData.professionalId ?? ""),
         app,
         status: "active",
         createdAt: FieldValue.serverTimestamp(),
@@ -220,8 +233,15 @@ export const passkeyRegisterVerify = onRequest({ region: REGION, cors: false, ma
       await Promise.all([passkeyRef.delete(), accountRef.delete()]);
       throw error;
     }
-    const token = await auth.createCustomToken(challengeData.uid, { role: "patient", authMethod: "passkey" });
-    return send(res, 200, { verified: true, uid: challengeData.uid, customToken: token });
+    const account = {
+      role: app === "tabebik_user" ? "patient" : app === "tabebik_doctor" ? "doctor" : "center",
+      phone: String(challengeData.phone ?? ""),
+      professionalId: String(challengeData.professionalId ?? ""),
+      displayName,
+      app,
+    };
+    const token = await auth.createCustomToken(challengeData.uid, { role: account.role, authMethod: "passkey" });
+    return send(res, 200, { verified: true, uid: challengeData.uid, customToken: token, account });
   } catch (error) {
     console.error("passkeyRegisterVerify failed", error);
     return send(res, 401, { error: "passkey-registration-failed" });
@@ -300,7 +320,18 @@ export const passkeyLoginVerify = onRequest({ region: REGION, cors: false, maxIn
     const account = await db.collection("passkeyAccounts").doc(stored.uid).get();
     if (!account.exists || account.data().status !== "active") return send(res, 403, { error: "account-disabled" });
     const token = await auth.createCustomToken(stored.uid, { role: account.data().role, authMethod: "passkey" });
-    return send(res, 200, { verified: true, uid: stored.uid, customToken: token });
+    return send(res, 200, {
+      verified: true,
+      uid: stored.uid,
+      customToken: token,
+      account: {
+        role: account.data().role,
+        phone: account.data().phone ?? "",
+        professionalId: account.data().professionalId ?? "",
+        displayName: account.data().displayName ?? "",
+        app: account.data().app,
+      },
+    });
   } catch (error) {
     console.error("passkeyLoginVerify failed", error);
     return send(res, 401, { error: "passkey-authentication-failed" });
