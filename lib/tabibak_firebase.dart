@@ -60,6 +60,7 @@ class Fb {
 
   // ───────────────────────── Firebase Phone Auth (SMS OTP) ─────────────────────────
   static String? _verificationId;
+  static String? _verificationPhone;
   static int? _resendToken;
 
   static Future<void> sendCode(
@@ -72,11 +73,13 @@ class Fb {
       onError('خدمة التحقق غير مهيّأة');
       return;
     }
+    _verificationId = null;
+    final token = _verificationPhone == phone ? _resendToken : null;
     try {
       await _auth.verifyPhoneNumber(
         phoneNumber: phone,
         timeout: const Duration(seconds: 60),
-        forceResendingToken: _resendToken,
+        forceResendingToken: token,
         verificationCompleted: (credential) async {
           try {
             await _auth.signInWithCredential(credential);
@@ -90,11 +93,13 @@ class Fb {
         },
         codeSent: (verificationId, resendToken) {
           _verificationId = verificationId;
+          _verificationPhone = phone;
           _resendToken = resendToken;
           onSent();
         },
         codeAutoRetrievalTimeout: (verificationId) {
           _verificationId = verificationId;
+          _verificationPhone = phone;
         },
       );
     } on FirebaseAuthException catch (e) {
@@ -114,6 +119,8 @@ class Fb {
       );
       await _auth.signInWithCredential(credential);
       _verificationId = null;
+      _verificationPhone = null;
+      _resendToken = null;
       return null;
     } on FirebaseAuthException catch (e) {
       return switch (e.code) {
