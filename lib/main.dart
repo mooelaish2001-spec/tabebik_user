@@ -2985,7 +2985,7 @@ class DeviceStore {
 }
 
 /// دليل الحسابات (محاكاة الخادم): رقم الهاتف ← الحساب. يسمح بالدخول من جهاز آخر (أو بعد إعادة التثبيت)
-/// برقمك + رمز التحقق فتعود بياناتك. في الإنتاج هذا جدول على الخادم، والهاتف فيه فريد.
+/// بمفتاح المرور المرتبط بحسابك فتعود بياناتك. في الإنتاج هذا جدول على الخادم، والهاتف فيه فريد.
 final userDir = <String, Map<String, dynamic>>{};
 
 /// صور رمزية جاهزة (الفهرس 0 محجوز للحرف الأول من الاسم).
@@ -3194,7 +3194,7 @@ class _LoginState extends State<LoginScreen> {
             child: ListView(padding: const EdgeInsets.fromLTRB(24, 24, 24, 16), children: [
               Center(child: Text('أهلاً بك في طبيبك', style: t(22))),
               gap(6),
-              Center(child: Text('أنشئ حسابك بمفتاح مرور. تستخدم بصمة الإصبع أو الوجه أو رمز قفل جهازك، دون رسائل SMS أو OTP.', textAlign: TextAlign.center, style: t(13, w: FontWeight.w500, c: kGrey, h: 1.7))),
+              Center(child: Text('أنشئ حسابك بمفتاح مرور. تستخدم بصمة الإصبع أو الوجه أو رمز قفل جهازك، ولا نرسل رسائل SMS.', textAlign: TextAlign.center, style: t(13, w: FontWeight.w500, c: kGrey, h: 1.7))),
               gap(16),
               AppField('الاسم', controller: nm, hint: 'مثال: أحمد محمد علي', icon: Icons.person_outline_rounded),
               gap(10),
@@ -6421,7 +6421,7 @@ class ProfileScreen extends StatelessWidget {
       );
 
   Future<void> logout(BuildContext c) async {
-    final ok = await confirm(c, 'تسجيل الخروج؟', 'يمكنك الدخول مجدداً برقم هاتفك ورمز التحقق، وستعود بياناتك كما هي.', yes: 'تسجيل الخروج', no: 'بقاء');
+    final ok = await confirm(c, 'تسجيل الخروج؟', 'يمكنك الدخول مجدداً بمفتاح المرور المرتبط بحسابك، وستعود بياناتك كما هي.', yes: 'تسجيل الخروج', no: 'بقاء');
     if (!ok || !c.mounted) return;
     app.signOut();
     Navigator.pushAndRemoveUntil(c, MaterialPageRoute(builder: (_) => const LoginScreen()), (r) => false);
