@@ -234,7 +234,7 @@ service cloud.firestore {
           && request.resource.data.lic == resource.data.lic
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'status', 'fee', 'days', 'from', 'to', 'kind', 'city', 'place',
-            'address', 'centerPhone', 'invites', 'home', 'homePrice',
+            'centerName', 'address', 'centerPhone', 'invites', 'home', 'homePrice',
             'accepting', 'on', 'doc', 'updatedAt'
           ])
         )
