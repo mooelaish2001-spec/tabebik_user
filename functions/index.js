@@ -128,7 +128,7 @@ export const passkeyRegisterOptions = onRequest({ region: REGION, cors: false, m
     const phone = String(req.body?.phone ?? "").trim();
     const professionalId = String(req.body?.professionalId ?? "").trim();
     if (!app || !assertPayload(displayName, 80)) return send(res, 400, { error: "invalid-registration-data" });
-    if (app !== "tabebik_user" && !assertPayload(phone, 20)) return send(res, 400, { error: "phone-required" });
+    if (!assertPayload(phone, 20)) return send(res, 400, { error: "phone-required" });
     if (app === "tabebik_doctor" && !/^\\d{3,8}$/.test(professionalId)) return send(res, 400, { error: "council-number-required" });
     // Never allow a passkey-only user to take over a pre-existing professional
     // record created by a center. Those claims require a manual identity review.
@@ -193,16 +193,27 @@ export const passkeyRegisterVerify = onRequest({ region: REGION, cors: false, ma
     const { credential, credentialDeviceType, credentialBackedUp } = verification.registrationInfo;
     const passkeyRef = db.collection("passkeyCredentials").doc(credential.id);
     const accountRef = db.collection("passkeyAccounts").doc(challengeData.uid);
+    const identityValue = app === "tabebik_doctor" ? challengeData.professionalId : challengeData.phone;
+    const identityId = createHash("sha256").update(app + ":" + identityValue).digest("hex");
+    const identityRef = db.collection("passkeyIdentityIndex").doc(identityId);
+    if (app === "tabebik_doctor") {
+      const [key, doctor] = await Promise.all([
+        db.collection("doctorKeys").doc(challengeData.professionalId).get(),
+        db.collection("doctors").doc(challengeData.professionalId).get(),
+      ]);
+      if (key.exists || doctor.exists) return send(res, 409, { error: "professional-account-claim-required" });
+    }
     await db.runTransaction(async (tx) => {
-      const [challengeNow, existingCredential, existingAccount] = await Promise.all([
+      const [challengeNow, existingCredential, existingAccount, existingIdentity] = await Promise.all([
         tx.get(db.collection("passkeyChallenges").doc(challenge)),
         tx.get(passkeyRef),
         tx.get(accountRef),
+        tx.get(identityRef),
       ]);
       if (!challengeNow.exists || challengeNow.data().consumed || challengeNow.data().expiresAt.toMillis() < Date.now()) {
         throw new Error("challenge-already-used");
       }
-      if (existingCredential.exists || existingAccount.exists) throw new Error("credential-or-account-exists");
+      if (existingCredential.exists || existingAccount.exists || existingIdentity.exists) throw new Error("credential-or-account-exists");
       tx.update(db.collection("passkeyChallenges").doc(challenge), { consumed: true, consumedAt: FieldValue.serverTimestamp() });
       tx.create(passkeyRef, {
         uid: challengeData.uid,
@@ -212,6 +223,11 @@ export const passkeyRegisterVerify = onRequest({ region: REGION, cors: false, ma
         transports: credential.transports ?? [],
         deviceType: credentialDeviceType,
         backedUp: credentialBackedUp,
+        app,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      tx.create(identityRef, {
+        uid: challengeData.uid,
         app,
         createdAt: FieldValue.serverTimestamp(),
       });
@@ -232,7 +248,7 @@ export const passkeyRegisterVerify = onRequest({ region: REGION, cors: false, ma
       await auth.createUser({ uid: challengeData.uid, displayName });
     } catch (error) {
       // Roll back Firestore credential/account records if Firebase Auth creation fails.
-      await Promise.all([passkeyRef.delete(), accountRef.delete()]);
+      await Promise.all([passkeyRef.delete(), accountRef.delete(), identityRef.delete()]);
       throw error;
     }
     const account = {
