@@ -139,6 +139,10 @@ export const passkeyRegisterOptions = onRequest({ region: REGION, cors: false, m
       ]);
       if (key.exists || doctor.exists) return send(res, 409, { error: "professional-account-claim-required" });
     }
+    if (app === "tabebik_center") {
+      const member = await db.collection("centerMembers").doc(phone).get();
+      if (member.exists) return send(res, 409, { error: "center-membership-claim-required" });
+    }
     if (!(await rateLimit(req, "register", 5, 60 * 60 * 1000))) return send(res, 429, { error: "rate-limited" });
 
     const uid = randomUUID();
