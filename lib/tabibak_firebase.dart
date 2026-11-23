@@ -169,7 +169,7 @@ class Fb {
   /// الأطباء الموثَّقون فقط.
   static Stream<List<Map<String, dynamic>>> doctors() => _watch(_db.collection('doctors').where('verified', isEqualTo: true));
 
-  static Stream<List<Map<String, dynamic>>> memberships() => _watch(_db.collection('memberships'));
+  static Stream<List<Map<String, dynamic>>> memberships() => _watch(_db.collection('memberships').where('status', isEqualTo: 'active'));
   static Stream<List<Map<String, dynamic>>> membershipsOfCenter(String centerId) => _watch(_db.collection('memberships').where('centerId', isEqualTo: centerId));
   static Stream<List<Map<String, dynamic>>> membershipsOfDoctor(String lic) => _watch(_db.collection('memberships').where('lic', isEqualTo: lic));
 
