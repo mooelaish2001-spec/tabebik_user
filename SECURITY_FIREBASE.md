@@ -48,8 +48,12 @@ Firebase transport encryption and at-rest encryption are platform protections, n
 6. Deploy only after all tests pass and a security review confirms no cross-role reads/writes.
 
 
-## 2026-11 schema migration work (client API stage)
-- The shared Firebase helper now has an operational-booking allowlist. It rejects unknown keys (including complaint and health payloads) and requires the signed-in UID to match patientUid.
-- A separate medical-private write API requires an authenticated patient, explicit consent flag, and doctor UID; it stores the medical payload under bookings/{bookingId}/private/medical with patientUid/doctorUid metadata.
-- A revocation-request helper writes a patient-doctor grant revocation request.
-- IMPORTANT: these client helpers are preparatory only. Current Firestore rules intentionally deny booking/private/grant writes, and the main.dart booking flows still need to be migrated away from direct Firestore writes. Do not deploy or treat this as production-ready until backend authorization, consent grant lifecycle, encryption, rules and emulator tests are completed.
+## 2026-11 backend integration stage
+- Patient booking creation now uses the `createPatientBooking` callable. The server rejects unknown/medical fields, sets `patientUid` from Firebase Auth, and checks the approved center and verified doctor membership before creating a doctor booking.
+- The patient app uses `listPatientBookings` to refresh booking status and `listPatientFollowUps` to show linked in-person visits. These responses contain operational metadata only.
+- Encounter-code redemption is tied to the same Firebase UID that owns the booking. The doctor-side callable checks the verified doctor profile UID, recorded attendance and completed visit; the raw six-digit code is not stored in Firestore.
+- Patient Firebase Auth is currently anonymous. The typed phone number is not verified; the anonymous UID is the booking owner and may be lost if app data is cleared or the app is reinstalled.
+- The doctor repository does not currently contain a checked-in Firebase project binding/config file, so the project used by its Functions must be confirmed to match the patient app's configured project before deployment.
+- Firestore and Storage rules remain fail-closed. Functions source has not been deployed. App Check, the `ENCOUNTER_CODE_PEPPER` secret and trusted doctor claims must be provisioned before live tests.
+- The follow-up screen currently lists the linked visit only. Clinical exam/treatment data, patient uploads, medical-record consent, encrypted storage and key management are not implemented as live services.
+- Do not store real medical data or loosen rules until schema migration, consent lifecycle, encryption/key management, Firebase Emulator authorization tests and a security review are complete.
