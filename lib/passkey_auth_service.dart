@@ -44,6 +44,13 @@ class PasskeyAuthService {
       'professionalId': professionalId,
     });
     final options = Map<String, dynamic>.from(start['options'] as Map);
+    final selection = Map<String, dynamic>.from(
+      (options['authenticatorSelection'] as Map?) ?? const {},
+    );
+    selection['requireResidentKey'] ??= true;
+    selection['residentKey'] ??= 'required';
+    selection['userVerification'] ??= 'required';
+    options['authenticatorSelection'] = selection;
     final challenge = options['challenge'] as String;
 
     final platformCredential = await _authenticator.register(
