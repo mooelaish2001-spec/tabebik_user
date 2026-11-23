@@ -114,6 +114,7 @@ service cloud.firestore {
         )
         || (
           centerManager(resource.data.centerId)
+          && (request.resource.data.status != 'active' || approvedCenter(resource.data.centerId))
           && request.resource.data.centerId == resource.data.centerId
           && request.resource.data.phone == memberPhone
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -192,8 +193,6 @@ service cloud.firestore {
     match /memberships/{membershipId} {
       allow read: if (
         resource.data.status == 'active'
-        && resource.data.centerId is string
-        && approvedCenter(resource.data.centerId)
       )
       || (resource.data.centerId is string && centerMember(resource.data.centerId))
       || doctorOwner(resource.data.lic)
@@ -203,6 +202,7 @@ service cloud.firestore {
         (
           request.resource.data.initiatedBy == 'center'
           && request.resource.data.status == 'invitedByCenter'
+          && approvedCenter(request.resource.data.centerId)
           && centerManager(request.resource.data.centerId)
         )
         || (
@@ -224,6 +224,7 @@ service cloud.firestore {
         )
         || (
           doctorOwner(resource.data.lic)
+          && (request.resource.data.status != 'active' || approvedCenter(resource.data.centerId))
           && request.resource.data.centerId == resource.data.centerId
           && request.resource.data.lic == resource.data.lic
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
