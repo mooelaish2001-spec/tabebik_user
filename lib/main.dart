@@ -1757,6 +1757,75 @@ class AppState extends ChangeNotifier {
     return a;
   }
 
+  /// يزامن الحجوزات التشغيلية من الخادم لإظهار تأكيد المركز أو الإلغاء.
+  Future<void> syncRemoteBookings() async {
+    final user = firebaseReady ? FirebaseAuth.instance.currentUser : null;
+    if (user == null) return;
+    try {
+      final result = await FirebaseFunctions.instance.httpsCallable('listPatientBookings').call();
+      final data = Map<String, dynamic>.from(result.data as Map);
+      final rows = (data['bookings'] as List? ?? const [])
+          .whereType<Map>()
+          .map((x) => Map<String, dynamic>.from(x));
+      for (final row in rows) {
+        final bookingId = (row['bookingId'] ?? row['id'] ?? '').toString();
+        if (bookingId.isEmpty) continue;
+        final title = (row['title'] ?? 'حجز طبي').toString();
+        final centerId = (row['centerId'] ?? '').toString();
+        final name = (row['name'] ?? '').toString();
+        final date = DateTime.tryParse((row['dateIso'] ?? '').toString());
+        final day = date == null ? (row['when'] ?? 'موعد غير محدد').toString() : dayLabel(date);
+        final minutes = (row['timeMin'] as num?)?.toInt() ?? 0;
+        final hour24 = minutes ~/ 60;
+        final hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12;
+        final time = '$hour12:${(minutes % 60).toString().padLeft(2, '0')} ${hour24 < 12 ? 'ص' : 'م'}';
+        final type = (row['type'] as num?)?.toInt() ?? 0;
+        final svc = (row['svc'] as num?)?.toInt() ?? 0;
+        final kind = type == 2 && svc == 2 ? 3 : type;
+        final lic = (row['doctorLic'] ?? '').toString();
+        final nextStatus = kFromCenterStatus[(row['status'] ?? '').toString()] ?? 'قيد التأكيد';
+        Appt? existing;
+        for (final a in appts) {
+          if (a.remoteId == bookingId ||
+              (a.remoteId.isEmpty && a.title == title && a.centerId == centerId && a.day == day && a.time == time && a.who == name)) {
+            existing = a;
+            break;
+          }
+        }
+        if (existing == null) {
+          final a = Appt(
+            newId(), kind, title, (row['place'] ?? '').toString(), day, time,
+            status: nextStatus,
+            price: (row['price'] as num?)?.toInt() ?? 0,
+            place: (row['place'] ?? '').toString(),
+            centerId: centerId,
+            who: name,
+            phone: (row['phone'] ?? '').toString(),
+            doctor: lic.isEmpty ? null : docBy(lic),
+          )..remoteId = bookingId;
+          appts.add(a);
+        } else {
+          final previous = existing.status;
+          existing.remoteId = bookingId;
+          existing.status = nextStatus;
+          existing.price = (row['price'] as num?)?.toInt() ?? existing.price;
+          if (previous != nextStatus && nextStatus != 'قيد التأكيد') {
+            final confirmed = nextStatus == 'مؤكد';
+            notifs.insert(0, Notif(
+              confirmed ? Icons.event_available_rounded : Icons.info_outline_rounded,
+              confirmed ? 'تم تأكيد حجزك' : 'تم تحديث حالة الحجز',
+              confirmed ? 'أكد المركز موعدك مع $title.' : 'حالة حجزك مع $title: $nextStatus.',
+              'الآن', unread: true, dest: 1,
+            ));
+          }
+        }
+      }
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Patient bookings sync failed: $e');
+    }
+  }
+
   bool isFav(Doctor d) => favs.contains(d.reg);
   void toggleFav(Doctor d) {
     if (favs.contains(d.reg)) {
@@ -5207,6 +5276,12 @@ class AppointmentsScreen extends StatefulWidget {
 class _AppointmentsState extends State<AppointmentsScreen> {
   int tab = 0;
   static const tabs = ['القادمة', 'السابقة', 'الملغاة'];
+
+  @override
+  void initState() {
+    super.initState();
+    app.syncRemoteBookings();
+  }
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
