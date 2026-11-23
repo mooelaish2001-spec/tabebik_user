@@ -1,13 +1,60 @@
 rules_version = '2';
-
-// TEMPORARY SAFE DEFAULT.
-// These rules intentionally deny all client access until Firebase
-// Authentication and role-based authorization are implemented.
-// Do not deploy as production rules while the apps require Firestore access.
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if false;
+    function signedIn() { return request.auth != null; }
+    function isPatient() { return signedIn() && request.auth.token.role == 'patient'; }
+    function isDoctor() { return signedIn() && request.auth.token.role == 'doctor' && request.auth.token.doctorLic is string; }
+    function isCenterStaff() { return signedIn() && request.auth.token.role in ['center_manager', 'center_reception'] && request.auth.token.centerId is string; }
+    function isPlatformAdmin() { return signedIn() && request.auth.token.platformAdmin == true; }
+
+    // Public directory: only approved/verified records are visible.
+    match /centers/{centerId} {
+      allow get, list: if resource.data.status == 1;
+      allow create, update, delete: if isPlatformAdmin();
+      match /private/{docId} {
+        allow read, write: if isCenterStaff()
+          && request.auth.token.centerId == centerId
+          && docId in ['ops'];
+        // Bank/payment credentials are deliberately server-only.
+        allow read, write: if false;
+      }
     }
+
+    match /doctors/{doctorLic} {
+      allow get, list: if resource.data.verified == true;
+      allow create, update, delete: if isPlatformAdmin();
+    }
+
+    // These records contain phone numbers or identity data: server-managed only.
+    match /doctorKeys/{doctorLic} { allow read, write: if false; }
+    match /centerMembers/{memberId} { allow read, write: if false; }
+
+    // Memberships are not public. Do not trust a client-supplied membership status.
+    match /memberships/{membershipId} {
+      allow read: if isPlatformAdmin()
+        || (isDoctor() && resource.data.lic == request.auth.token.doctorLic)
+        || (isCenterStaff() && resource.data.centerId == request.auth.token.centerId);
+      allow write: if isPlatformAdmin();
+    }
+
+    // Patient profile currently has mixed profile/health fields. Keep it closed
+    // until non-medical profile data is separated from the medical record.
+    match /users/{uid} { allow read, write: if false; }
+
+    // Existing booking documents mix operational fields with complaint/health data.
+    // Firestore rules cannot hide selected fields from a center once the document is read.
+    // Therefore all client access is denied until the operational/medical split is migrated.
+    match /bookings/{bookingId} {
+      allow read, write: if false;
+      match /private/{privateId} { allow read, write: if false; }
+    }
+
+    // Medical records, encounter codes and follow-up notes are server-only until
+    // patient consent, assigned-doctor linkage and encryption/key lifecycle are deployed.
+    match /encounters/{id} { allow read, write: if false; }
+    match /medicalRecords/{id} { allow read, write: if false; }
+    match /followUps/{id} { allow read, write: if false; }
+
+    match /{document=**} { allow read, write: if false; }
   }
 }

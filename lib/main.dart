@@ -10,6 +10,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:image_picker/image_picker.dart';
 import 'firebase_options.dart';
 
@@ -94,6 +95,26 @@ String initial(String n) {
 const kWeek = ['الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت', 'الأحد'];
 const kMonths = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
 String dayLabel(DateTime d) => '${kWeek[d.weekday - 1]} ${d.day} ${kMonths[d.month - 1]}';
+
+/// يحوّل اليوم المختار من صيغة العرض إلى تاريخ ISO. الخيارات في SchedulePicker
+/// محصورة بالأيام السبعة القادمة؛ نختار السنة التي تجعل التاريخ أقرب موعد مستقبلي.
+String? dayLabelToIso(String label, {DateTime? now}) {
+  final parts = label.trim().split(RegExp(r'\s+'));
+  if (parts.length != 3) return null;
+  final day = int.tryParse(parts[1]);
+  final month = kMonths.indexOf(parts[2]) + 1;
+  if (day == null || month < 1 || day < 1 || day > 31) return null;
+  final base = now ?? DateTime.now();
+  DateTime? selected;
+  for (final year in [base.year, base.year + 1]) {
+    final candidate = DateTime(year, month, day);
+    if (candidate.year != year || candidate.month != month || candidate.day != day) continue;
+    final delta = candidate.difference(DateTime(base.year, base.month, base.day)).inDays;
+    if (delta >= 0 && delta <= 8 && (selected == null || candidate.isBefore(selected))) selected = candidate;
+  }
+  if (selected == null) return null;
+  return '${selected.year}-${selected.month.toString().padLeft(2, '0')}-${selected.day.toString().padLeft(2, '0')}';
+}
 
 void snack(BuildContext c, String m, {bool ok = false}) {
   final sm = ScaffoldMessenger.of(c);
@@ -1473,20 +1494,20 @@ class Appt {
   final String centerId, phone;
   String complaint;
   final bool sharedHealth;
+  String remoteId = ''; // Firestore booking ID returned by the trusted booking callable.
 
   bool get upcoming => status == 'مؤكد' || status == 'قيد التأكيد' || status == 'قيد التنفيذ';
   String get code => 'TB-${20400 + id}';
   IconData get icon => const [Icons.medical_services_rounded, Icons.bed_rounded, Icons.vaccines_rounded, Icons.science_rounded][kind];
 
-  /// الحمولة التي تصل إلى المركز والطبيب عند الربط بالخادم.
-  /// مفاتيحها مطابقة لحقول Patient.fromPlatform في تطبيق الطبيب (name · age · female · phone · timeMin · place · complaint ·
-  /// conditions · allergies · meds · surgeries · transfusion · admission) ولحقول Booking في تطبيق المركز (type · svc · when · price · status).
+  /// حمولة تشغيلية فقط للمركز: لا تُرسل الشكوى أو الملف الصحي ضمن وثيقة الحجز.
+  /// لا نشارك بيانات طبية حتى يتوفر doctorUid موثوق وموافقة يعالجها الخادم.
   Map<String, dynamic> toPlatform() {
     final self = who.isEmpty || who == app.name;
     final isHome = kind == 2;
     return {
       'code': code,
-      'type': kind == 3 ? 2 : kind, // 0 طبيب · 1 سرير · 2 خدمة منزلية (زيارة طبيب/تمريض/معمل)
+      'type': kind == 3 ? 2 : kind,
       'svc': kind == 3 ? 2 : (isHome && title.contains('تمريض') ? 1 : 0),
       'centerId': centerId,
       'doctorLic': doctor?.reg ?? '',
@@ -1496,12 +1517,11 @@ class Appt {
       'female': self ? app.gender == 'أنثى' : false,
       'title': title,
       'when': '$day · $time',
+      'dateIso': dayLabelToIso(day) ?? '',
       'timeMin': parseTime(time) ?? 0,
       'place': place,
       'price': price,
       'status': kToCenterStatus[status] ?? 'جديد',
-      'complaint': complaint,
-      if (sharedHealth) ...app.health.toPlatform(),
     };
   }
 }
@@ -1717,26 +1737,93 @@ class AppState extends ChangeNotifier {
     if (n != null) notifs.insert(0, n);
     notifyListeners();
 
-    // إنشاء حجز مشترك ليظهر في تطبيق المركز والطبيب.
+    // إنشاء الحجز عبر الخادم؛ Firestore client writes مغلقة، والـ callable
+    // يضيف patientUid بنفسه ويرفض أي شكوى أو تشخيص أو بيانات طبية.
     final user = firebaseReady ? FirebaseAuth.instance.currentUser : null;
     if (user != null) {
-      final ref = FirebaseFirestore.instance.collection('bookings').doc();
-      ref.set({
-        ...a.toPlatform(),
-        'patientUid': user.uid,
-        'patientPhone': user.phoneNumber ?? phone,
-        'doctorLicense': a.doctor?.reg ?? '',
-        'patientName': name,
-        'bookingId': ref.id,
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      }).catchError((e) {
-        debugPrint('Firebase booking create failed: $e');
+      FirebaseFunctions.instance
+          .httpsCallable('createPatientBooking')
+          .call(a.toPlatform())
+          .then((result) {
+        final data = Map<String, dynamic>.from(result.data as Map);
+        a.remoteId = (data['bookingId'] ?? '').toString();
+        notifyListeners();
+      }).catchError((Object e) {
+        debugPrint('Secure booking creation failed: $e');
       });
     } else {
       debugPrint('Booking not uploaded: patient is not authenticated.');
     }
     return a;
+  }
+
+  /// يزامن الحجوزات التشغيلية من الخادم لإظهار تأكيد المركز أو الإلغاء.
+  Future<void> syncRemoteBookings() async {
+    final user = firebaseReady ? FirebaseAuth.instance.currentUser : null;
+    if (user == null) return;
+    try {
+      final result = await FirebaseFunctions.instance.httpsCallable('listPatientBookings').call();
+      final data = Map<String, dynamic>.from(result.data as Map);
+      final rows = (data['bookings'] as List? ?? const [])
+          .whereType<Map>()
+          .map((x) => Map<String, dynamic>.from(x));
+      for (final row in rows) {
+        final bookingId = (row['bookingId'] ?? row['id'] ?? '').toString();
+        if (bookingId.isEmpty) continue;
+        final title = (row['title'] ?? 'حجز طبي').toString();
+        final centerId = (row['centerId'] ?? '').toString();
+        final name = (row['name'] ?? '').toString();
+        final date = DateTime.tryParse((row['dateIso'] ?? '').toString());
+        final day = date == null ? (row['when'] ?? 'موعد غير محدد').toString() : dayLabel(date);
+        final minutes = (row['timeMin'] as num?)?.toInt() ?? 0;
+        final hour24 = minutes ~/ 60;
+        final hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12;
+        final time = '$hour12:${(minutes % 60).toString().padLeft(2, '0')} ${hour24 < 12 ? 'ص' : 'م'}';
+        final type = (row['type'] as num?)?.toInt() ?? 0;
+        final svc = (row['svc'] as num?)?.toInt() ?? 0;
+        final kind = type == 2 && svc == 2 ? 3 : type;
+        final lic = (row['doctorLic'] ?? '').toString();
+        final nextStatus = kFromCenterStatus[(row['status'] ?? '').toString()] ?? 'قيد التأكيد';
+        Appt? existing;
+        for (final a in appts) {
+          if (a.remoteId == bookingId ||
+              (a.remoteId.isEmpty && a.title == title && a.centerId == centerId && a.day == day && a.time == time && a.who == name)) {
+            existing = a;
+            break;
+          }
+        }
+        if (existing == null) {
+          final a = Appt(
+            newId(), kind, title, (row['place'] ?? '').toString(), day, time,
+            status: nextStatus,
+            price: (row['price'] as num?)?.toInt() ?? 0,
+            place: (row['place'] ?? '').toString(),
+            centerId: centerId,
+            who: name,
+            phone: (row['phone'] ?? '').toString(),
+            doctor: lic.isEmpty ? null : docBy(lic),
+          )..remoteId = bookingId;
+          appts.add(a);
+        } else {
+          final previous = existing.status;
+          existing.remoteId = bookingId;
+          existing.status = nextStatus;
+          existing.price = (row['price'] as num?)?.toInt() ?? existing.price;
+          if (previous != nextStatus && nextStatus != 'قيد التأكيد') {
+            final confirmed = nextStatus == 'مؤكد';
+            notifs.insert(0, Notif(
+              confirmed ? Icons.event_available_rounded : Icons.info_outline_rounded,
+              confirmed ? 'تم تأكيد حجزك' : 'تم تحديث حالة الحجز',
+              confirmed ? 'أكد المركز موعدك مع $title.' : 'حالة حجزك مع $title: $nextStatus.',
+              'الآن', unread: true, dest: 1,
+            ));
+          }
+        }
+      }
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Patient bookings sync failed: $e');
+    }
   }
 
   bool isFav(Doctor d) => favs.contains(d.reg);
@@ -3276,6 +3363,27 @@ class HomeScreen extends StatelessWidget {
                     service(c, Icons.home_rounded, kTeal, kTealBg, 'خدمة منزلية', 'طبيب - ممرض - معمل', const HomeCentersScreen()),
                   ],
                 ),
+                secRow('المتابعة الطبية'),
+                Tap(onTap: () => go(c, const EncounterCodeScreen()), child: Container(
+                  margin: const EdgeInsets.only(bottom: 18), padding: const EdgeInsets.all(16), decoration: cardBox(20),
+                  child: Row(children: [
+                    gTile(Icons.fact_check_rounded, size: 48, color: kBlue), gapW(12),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('إدخال كود إثبات المقابلة', style: t(14)),
+                      Text('اربط الزيارة الحضورية بمتابعتك', style: t(11.5, w: FontWeight.w500, c: kGrey)),
+                    ])), chev(),
+                  ]),
+                )),
+                Tap(onTap: () => go(c, const MyFollowUpsScreen()), child: Container(
+                  margin: const EdgeInsets.only(bottom: 18), padding: const EdgeInsets.all(16), decoration: cardBox(20),
+                  child: Row(children: [
+                    gTile(Icons.folder_open_rounded, size: 48, color: kTeal), gapW(12),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('متابعاتي', style: t(14)),
+                      Text('عرض الزيارات المرتبطة بكود الإثبات', style: t(11.5, w: FontWeight.w500, c: kGrey)),
+                    ])), chev(),
+                  ]),
+                )),
                 secRow('أطباء مميزون', more: 'عرض الكل', onMore: () => go(c, const DoctorListScreen())),
                 SizedBox(
                   height: 176,
@@ -3295,6 +3403,156 @@ class HomeScreen extends StatelessWidget {
           ]),
         ),
       );
+}
+
+// ───────────────────────── إثبات المقابلة وربط المتابعة ─────────────────────────
+class EncounterCodeScreen extends StatefulWidget {
+  const EncounterCodeScreen({super.key});
+  @override
+  State<EncounterCodeScreen> createState() => _EncounterCodeScreenState();
+}
+class _EncounterCodeScreenState extends State<EncounterCodeScreen> {
+  final ctl = TextEditingController();
+  bool busy = false, linked = false;
+  String? error, encounterId;
+  @override
+  void dispose() { ctl.dispose(); super.dispose(); }
+  Future<void> redeem() async {
+    final code = ctl.text.replaceAll(RegExp(r'[^0-9]'), '');
+    if (code.length != 6) { setState(() => error = 'أدخل الرمز المكوّن من ستة أرقام.'); return; }
+    if (!firebaseReady) { setState(() => error = 'الاتصال بالخادم غير متاح حالياً. لم يتم حفظ الرمز.'); return; }
+    if (FirebaseAuth.instance.currentUser == null) { setState(() => error = 'يجب ربط هذا الحساب بهوية مريض موثوقة قبل استرداد الرمز. لم يتم ربط المتابعة.'); return; }
+    setState(() { busy = true; error = null; });
+    try {
+      final result = await FirebaseFunctions.instance.httpsCallable('redeemEncounterCode').call(<String, dynamic>{'code': code});
+      final data = Map<String, dynamic>.from(result.data as Map);
+      if (!mounted) return;
+      setState(() { linked = data['linked'] == true; encounterId = data['encounterId']?.toString(); busy = false; });
+    } on FirebaseFunctionsException catch (e) {
+      if (!mounted) return;
+      setState(() { busy = false; error = switch (e.code) {
+        'not-found' => 'الرمز غير صحيح أو انتهت صلاحيته.',
+        'permission-denied' => 'هذا الرمز لا يخص حساب المريض الحالي.',
+        'already-exists' || 'failed-precondition' => e.message ?? 'تم استخدام الرمز أو لا تنطبق شروط الربط.',
+        'unauthenticated' => 'يجب تسجيل الدخول بهوية مريض موثوقة أولاً.',
+        _ => e.message ?? 'تعذر ربط المتابعة. حاول لاحقاً.',
+      }; });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() { busy = false; error = 'تعذر الاتصال بخدمة ربط المتابعة.'; });
+    }
+  }
+  @override
+  Widget build(BuildContext context) => RedPage(
+    title: 'ربط المتابعة',
+    body: ListView(padding: const EdgeInsets.all(18), children: [
+      tileIcon(Icons.fact_check_rounded, size: 72), gap(14),
+      Text('كود إثبات المقابلة الحضورية', textAlign: TextAlign.center, style: t(19)), gap(8),
+      Text('يصدر الطبيب الكود بعد إكمال الكشف الحضوري. أدخله لربط هذه الزيارة بمتابعتك داخل التطبيق. الكود لا يعني أن التطبيق يقدم علاجاً عن بُعد ولا يغني عن مقابلة الطبيب.', textAlign: TextAlign.center, style: t(13, w: FontWeight.w500, c: kGrey, h: 1.7)), gap(22),
+      if (linked) ...[
+        tileIcon(Icons.verified_rounded, size: 62, color: kGreen), gap(10),
+        Text('تم ربط إثبات المقابلة بنجاح', textAlign: TextAlign.center, style: t(17, c: kGreenDk)),
+        if (encounterId != null) Text('رقم المتابعة: $encounterId', textAlign: TextAlign.center, style: t(12, c: kGrey)),
+        gap(14),
+        RedButton('عرض متابعاتي', icon: Icons.folder_open_rounded, onTap: () => go(context, const MyFollowUpsScreen())),
+      ] else ...[
+        TextField(controller: ctl, keyboardType: TextInputType.number, textAlign: TextAlign.center, maxLength: 6,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
+          style: t(27, w: FontWeight.w800).copyWith(letterSpacing: 12),
+          decoration: InputDecoration(counterText: '', hintText: '------', filled: true, fillColor: Colors.white,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: const BorderSide(color: kLine)),
+            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: const BorderSide(color: kLine))),
+          onChanged: (_) { if (error != null) setState(() => error = null); }),
+        if (error != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(error!, textAlign: TextAlign.center, style: t(12, c: kRed))),
+        gap(14), RedButton(busy ? 'جارٍ التحقق...' : 'تحقق واربط المتابعة', icon: Icons.link_rounded, loading: busy, enabled: !busy, onTap: redeem),
+      ],
+      gap(16),
+      Container(padding: const EdgeInsets.all(14), decoration: BoxDecoration(color: kBlueBg, borderRadius: BorderRadius.circular(16)),
+        child: Text('الرمز صالح لمدة 24 ساعة ويُستخدم مرة واحدة، ولا يقبله النظام إلا لحساب المريض المرتبط بالحجز.', textAlign: TextAlign.center, style: t(12, w: FontWeight.w500, c: kSub, h: 1.6))),
+    ]),
+  );
+}
+
+// ───────────────────────── متابعات المريض ─────────────────────────
+class MyFollowUpsScreen extends StatefulWidget {
+  const MyFollowUpsScreen({super.key});
+  @override
+  State<MyFollowUpsScreen> createState() => _MyFollowUpsScreenState();
+}
+
+class _MyFollowUpsScreenState extends State<MyFollowUpsScreen> {
+  bool busy = true;
+  String? error;
+  List<Map<String, dynamic>> rows = [];
+
+  @override
+  void initState() {
+    super.initState();
+    load();
+  }
+
+  Future<void> load() async {
+    if (!firebaseReady || FirebaseAuth.instance.currentUser == null) {
+      if (mounted) setState(() { busy = false; error = 'سجّل الدخول واتصل بالخادم لعرض متابعاتك.'; });
+      return;
+    }
+    if (mounted) setState(() { busy = true; error = null; });
+    try {
+      final result = await FirebaseFunctions.instance.httpsCallable('listPatientFollowUps').call();
+      final data = Map<String, dynamic>.from(result.data as Map);
+      final list = (data['followUps'] as List? ?? const [])
+          .whereType<Map>()
+          .map((x) => Map<String, dynamic>.from(x))
+          .toList();
+      if (mounted) setState(() { rows = list; busy = false; });
+    } catch (e) {
+      if (mounted) setState(() { busy = false; error = 'تعذر تحميل المتابعات من الخادم.'; });
+      debugPrint('Patient follow-ups load failed: $e');
+    }
+  }
+
+  String visitDate(Map<String, dynamic> row) {
+    final iso = (row['dateIso'] ?? '').toString();
+    if (iso.isEmpty) return 'تاريخ الزيارة غير متاح';
+    final time = (row['timeMin'] as num?)?.toInt() ?? 0;
+    final hour = time ~/ 60;
+    final minute = time % 60;
+    return '$iso · ${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) => RedPage(
+    title: 'متابعاتي',
+    body: busy
+        ? const Center(child: CircularProgressIndicator(color: kRed))
+        : error != null
+            ? EmptyState(Icons.cloud_off_rounded, 'تعذر عرض المتابعات', error!, btn: 'إعادة المحاولة', onTap: load)
+            : rows.isEmpty
+                ? EmptyState(Icons.fact_check_outlined, 'لا توجد متابعات مرتبطة', 'بعد المقابلة الحضورية، أدخل كود الإثبات الذي يعطيك الطبيب.')
+                : ListView(padding: const EdgeInsets.all(16), children: [
+                    for (final row in rows)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(15),
+                        decoration: cardBox(20),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Row(children: [
+                            tileIcon(Icons.medical_services_rounded, size: 42, color: kTeal, bg: kTealBg),
+                            gapW(10),
+                            Expanded(child: two(
+                              (row['doctorName'] ?? '').toString().isEmpty ? 'الطبيب' : 'د. ${row['doctorName']}',
+                              (row['centerName'] ?? '').toString(),
+                            )),
+                            pillOk('مرتبطة'),
+                          ]),
+                          const Divider(height: 22, color: kLine),
+                          kv('موعد الزيارة', visitDate(row)),
+                          kv('رقم المتابعة', (row['bookingId'] ?? row['id'] ?? '').toString()),
+                        ]),
+                      ),
+                    panel([Text('هذه الصفحة تعرض ربط الزيارة الحضورية فقط. تفاصيل الفحوصات ورفع الملفات الطبية تحتاج استكمال مسار المتابعة الآمن قبل تفعيلها.', style: t(12, w: FontWeight.w500, c: kSub, h: 1.7))]),
+                  ]),
+  );
 }
 
 // ───────────────────────── 5. Global search ─────────────────────────
@@ -5018,6 +5276,12 @@ class AppointmentsScreen extends StatefulWidget {
 class _AppointmentsState extends State<AppointmentsScreen> {
   int tab = 0;
   static const tabs = ['القادمة', 'السابقة', 'الملغاة'];
+
+  @override
+  void initState() {
+    super.initState();
+    app.syncRemoteBookings();
+  }
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(

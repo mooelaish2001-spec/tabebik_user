@@ -193,13 +193,101 @@ class Fb {
   static String newBookingId() => _db.collection('bookings').doc().id;
   static String codeOf(String id) => 'TB-${id.substring(0, 6).toUpperCase()}';
 
-  static Future<void> putBooking(String id, Map<String, dynamic> m) => _db.collection('bookings').doc(id).set({...m, 'code': codeOf(id), 'createdAt': FieldValue.serverTimestamp(), 'updatedAt': FieldValue.serverTimestamp()});
+  // Operational booking documents must never contain complaint, diagnosis, history or health payloads.
+  static const Set<String> _bookingOperationalKeys = {
+    'type', 'svc', 'centerId', 'doctorLic', 'doctorLicense', 'doctorUid',
+    'name', 'phone', 'age', 'female', 'title', 'when', 'timeMin', 'place',
+    'price', 'status', 'pay', 'patientUid', 'patientPhone', 'patientName',
+    'bookingId', 'arrived', 'visit', 'createdAt', 'updatedAt'
+  };
 
-  /// تعديل جزئي. المفاتيح المتداخلة بالنقطة مسموحة: {'pay.state': 'sent'}.
-  static Future<void> updateBooking(String id, Map<String, dynamic> patch) => _db.collection('bookings').doc(id).update({...patch, 'updatedAt': FieldValue.serverTimestamp()});
+  static Map<String, dynamic> _operationalBooking(Map<String, dynamic> input) {
+    final forbidden = input.keys.where((k) => !_bookingOperationalKeys.contains(k)).toList();
+    if (forbidden.isNotEmpty) {
+      throw ArgumentError('Booking contains non-operational fields: ${forbidden.join(', ')}. Store medical data separately.');
+    }
+    return Map<String, dynamic>.from(input);
+  }
+
+  static Future<void> putBooking(String id, Map<String, dynamic> m) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null || m['patientUid'] != uid) {
+      throw StateError('A signed-in patient may create only their own booking.');
+    }
+    await _db.collection('bookings').doc(id).set({
+      ..._operationalBooking(m),
+      'bookingId': id,
+      'code': codeOf(id),
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Medical payloads are separate from center-visible operational booking data.
+  /// Access is still denied by the current fail-closed rules until the consent-aware
+  /// backend and matching Firestore rules are deployed.
+  static Future<void> putBookingMedicalPrivate({
+    required String bookingId,
+    required String doctorUid,
+    required Map<String, dynamic> medicalData,
+    required bool patientConsent,
+  }) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null || !patientConsent || doctorUid.isEmpty) {
+      throw StateError('Patient authentication, explicit consent and doctor UID are required.');
+    }
+    const forbidden = {'centerId', 'role', 'doctorLic', 'verified', 'status'};
+    if (medicalData.keys.any(forbidden.contains)) {
+      throw ArgumentError('Medical payload contains identity or authorization fields.');
+    }
+    await _db.collection('bookings').doc(bookingId).collection('private').doc('medical').set({
+      'patientUid': uid,
+      'doctorUid': doctorUid,
+      'bookingId': bookingId,
+      'consentGranted': true,
+      'consentGrantedAt': FieldValue.serverTimestamp(),
+      'data': medicalData,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// A patient can revoke an explicit patient-doctor grant; server-side rules/backend
+  /// must validate ownership and propagate revocation to active sessions.
+  static Future<void> requestDoctorAccessRevocation(String doctorUid) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null || doctorUid.isEmpty) throw StateError('Authentication and doctor UID are required.');
+    await _db.collection('patientDoctorGrants').doc('${uid}_${doctorUid}').set({
+      'patientUid': uid,
+      'doctorUid': doctorUid,
+      'active': false,
+      'revocationRequestedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  /// تحديث محدود لحقول تشغيلية فقط. يمنع تمرير بيانات طبية أو حقول هوية/صلاحيات.
+  /// يجب أن تفرض Firestore Rules صلاحية الدور والملكية أيضاً؛ هذا الفحص ليس بديلاً عنها.
+  static const Set<String> _bookingUpdateKeys = {
+    'status', 'pay', 'pay.state', 'pay.info', 'pay.receiptUrl',
+    'arrived', 'visit', 'price'
+  };
+
+  static Future<void> updateBooking(String id, Map<String, dynamic> patch) async {
+    if (patch.isEmpty) throw ArgumentError('Booking update cannot be empty.');
+    final forbidden = patch.keys.where((key) => !_bookingUpdateKeys.contains(key)).toList();
+    if (forbidden.isNotEmpty) {
+      throw ArgumentError('Unsupported booking update fields: ${forbidden.join(', ')}');
+    }
+    await _db.collection('bookings').doc(id).update({
+      ...patch,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
 
   /// وثائق خاصة داخل الحجز (bookings/{id}/private/{name}): الملف الصحي الذي شاركه المريض — يقرؤه المريض والطبيب فقط (لا المركز).
-  static Future<void> putBookingPrivate(String id, String name, Map<String, dynamic> m) => _db.collection('bookings').doc(id).collection('private').doc(name).set(m);
+  @Deprecated('Use putBookingMedicalPrivate with explicit consent and doctor UID.')
+  static Future<void> putBookingPrivate(String id, String name, Map<String, dynamic> m) async {
+    throw StateError('Unscoped private booking writes are disabled. Use the consent-aware medical API.');
+  }
 
   static Future<Map<String, dynamic>?> bookingPrivate(String id, String name) async {
     final d = await _db.collection('bookings').doc(id).collection('private').doc(name).get();
