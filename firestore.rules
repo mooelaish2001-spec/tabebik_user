@@ -1,11 +1,286 @@
 rules_version = '2';
 
-// TEMPORARY SAFE DEFAULT.
-// These rules intentionally deny all client access until Firebase
-// Authentication and role-based authorization are implemented.
-// Do not deploy as production rules while the apps require Firestore access.
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function phoneNumber() {
+      return signedIn() ? request.auth.token.phone_number : null;
+    }
+
+    function centerMember(centerId) {
+      return signedIn()
+        && phoneNumber() != null
+        && exists(/databases/$(database)/documents/centerMembers/$(phoneNumber()))
+        && get(/databases/$(database)/documents/centerMembers/$(phoneNumber())).data.centerId == centerId
+        && get(/databases/$(database)/documents/centerMembers/$(phoneNumber())).data.active == true;
+    }
+
+    function centerManager(centerId) {
+      return centerMember(centerId)
+        && get(/databases/$(database)/documents/centerMembers/$(phoneNumber())).data.role == 0;
+    }
+
+    function doctorOwner(lic) {
+      return signedIn()
+        && lic is string
+        && lic != ''
+        && exists(/databases/$(database)/documents/doctors/$(lic))
+        && get(/databases/$(database)/documents/doctors/$(lic)).data.uid == request.auth.uid;
+    }
+
+    function doctorPhoneOwner(lic) {
+      return signedIn()
+        && lic is string
+        && lic != ''
+        && phoneNumber() != null
+        && exists(/databases/$(database)/documents/doctorKeys/$(lic))
+        && get(/databases/$(database)/documents/doctorKeys/$(lic)).data.phone == phoneNumber();
+    }
+
+    function approvedCenter(centerId) {
+      return exists(/databases/$(database)/documents/centers/$(centerId))
+        && get(/databases/$(database)/documents/centers/$(centerId)).data.status == 1;
+    }
+
+    function canReadBooking(data) {
+      return signedIn() && (
+        data.patientUid == request.auth.uid
+        || (data.centerId is string && data.centerId != '' && centerMember(data.centerId))
+        || (data.doctorLic is string && data.doctorLic != '' && doctorOwner(data.doctorLic))
+      );
+    }
+
+    match /users/{uid} {
+      allow read, create, update, delete: if signedIn() && request.auth.uid == uid;
+    }
+
+    match /centers/{centerId} {
+      allow read: if (resource.data.status == 1)
+        || (signedIn() && resource.data.managerUid == request.auth.uid)
+        || centerMember(centerId);
+
+      allow create: if signedIn()
+        && request.resource.data.managerUid == request.auth.uid
+        && request.resource.data.managerPhone == phoneNumber()
+        && request.resource.data.status == 0;
+
+      allow update: if centerManager(centerId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'name', 'kind', 'city', 'hood', 'address', 'phone', 'from', 'to',
+          'hours', 'daysText', 'svc', 'licensePath', 'updatedAt'
+        ]);
+
+      allow delete: if false;
+
+      match /private/{documentId} {
+        allow read, create, update, delete: if centerMember(centerId);
+      }
+    }
+
+    match /centerMembers/{memberPhone} {
+      allow read: if signedIn() && (
+        memberPhone == phoneNumber()
+        || centerMember(resource.data.centerId)
+      );
+
+      // Manager's initial membership is created atomically with the center.
+      allow create: if signedIn() && (
+        (
+          memberPhone == phoneNumber()
+          && request.resource.data.phone == phoneNumber()
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.role == 0
+          && getAfter(/databases/$(database)/documents/centers/$(request.resource.data.centerId)).data.managerUid == request.auth.uid
+        )
+        || (request.resource.data.centerId is string && centerManager(request.resource.data.centerId))
+      );
+
+      // A verified phone may claim an unbound staff record once; managers manage staff.
+      allow update: if signedIn() && (
+        (
+          memberPhone == phoneNumber()
+          && resource.data.uid == ''
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['uid'])
+        )
+        || (
+          centerManager(resource.data.centerId)
+          && request.resource.data.centerId == resource.data.centerId
+          && request.resource.data.phone == memberPhone
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'name', 'role', 'perms', 'active'
+          ])
+        )
+      );
+
+      allow delete: if centerManager(resource.data.centerId)
+        && resource.data.role != 0;
+    }
+
+    match /doctors/{lic} {
+      allow read: if (resource.data.verified == true)
+        || (signedIn() && resource.data.uid == request.auth.uid)
+        || doctorPhoneOwner(lic)
+        || (resource.data.createdBy is string
+          && resource.data.createdBy != ''
+          && centerMember(resource.data.createdBy));
+
+      allow create: if signedIn() && (
+        (
+          request.resource.data.uid == request.auth.uid
+          && getAfter(/databases/$(database)/documents/doctorKeys/$(lic)).data.phone == phoneNumber()
+        )
+        || (
+          request.resource.data.uid == ''
+          && request.resource.data.createdBy is string
+          && request.resource.data.createdBy != ''
+          && centerManager(request.resource.data.createdBy)
+        )
+      );
+
+      allow update: if doctorOwner(lic)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'name', 'spec', 'sub', 'grade', 'quals', 'qualsList', 'exp',
+          'female', 'bio', 'accepting', 'uid', 'claimed', 'updatedAt'
+        ]);
+
+      allow delete: if doctorOwner(lic);
+    }
+
+    match /doctorKeys/{lic} {
+      allow read: if doctorPhoneOwner(lic)
+        || (resource.data.createdBy is string
+          && resource.data.createdBy != ''
+          && centerManager(resource.data.createdBy));
+
+      allow create: if signedIn() && (
+        (
+          request.resource.data.phone == phoneNumber()
+          && request.resource.data.createdBy == ''
+        )
+        || (
+          request.resource.data.createdBy is string
+          && request.resource.data.createdBy != ''
+          && centerManager(request.resource.data.createdBy)
+        )
+      );
+
+      allow update: if false;
+      allow delete: if doctorOwner(lic)
+        || (resource.data.createdBy is string
+          && resource.data.createdBy != ''
+          && centerManager(resource.data.createdBy));
+    }
+
+    match /memberships/{membershipId} {
+      allow read: if (
+        resource.data.status == 'active'
+        && resource.data.centerId is string
+        && approvedCenter(resource.data.centerId)
+      )
+      || (resource.data.centerId is string && centerMember(resource.data.centerId))
+      || doctorOwner(resource.data.lic)
+      || doctorPhoneOwner(resource.data.lic);
+
+      allow create: if signedIn() && (
+        (
+          request.resource.data.initiatedBy == 'center'
+          && request.resource.data.status == 'invitedByCenter'
+          && centerManager(request.resource.data.centerId)
+        )
+        || (
+          request.resource.data.initiatedBy == 'doctor'
+          && doctorOwner(request.resource.data.lic)
+        )
+      );
+
+      allow update: if signedIn() && (
+        (
+          centerManager(resource.data.centerId)
+          && request.resource.data.centerId == resource.data.centerId
+          && request.resource.data.lic == resource.data.lic
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status', 'fee', 'days', 'from', 'to', 'kind', 'city', 'place',
+            'address', 'centerPhone', 'invites', 'home', 'homePrice',
+            'accepting', 'on', 'doc', 'updatedAt'
+          ])
+        )
+        || (
+          doctorOwner(resource.data.lic)
+          && request.resource.data.centerId == resource.data.centerId
+          && request.resource.data.lic == resource.data.lic
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status', 'fee', 'days', 'from', 'to', 'kind', 'city', 'place',
+            'address', 'centerPhone', 'invites', 'initiatedBy', 'doc', 'updatedAt'
+          ])
+        )
+      );
+
+      allow delete: if false;
+    }
+
+    match /bookings/{bookingId} {
+      allow create: if signedIn()
+        && request.resource.data.patientUid == request.auth.uid
+        && request.resource.data.centerId is string
+        && approvedCenter(request.resource.data.centerId)
+        && request.resource.data.status in ['جديد', 'قيد التأكيد'];
+
+      allow read: if canReadBooking(resource.data);
+
+      allow update: if signedIn() && (
+        (
+          resource.data.patientUid == request.auth.uid
+          && request.resource.data.patientUid == resource.data.patientUid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status', 'day', 'time', 'timeMin', 'dateIso', 'pay', 'updatedAt'
+          ])
+        )
+        || (
+          resource.data.centerId is string
+          && centerManager(resource.data.centerId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status', 'note', 'assigned', 'pay', 'updatedAt'
+          ])
+        )
+        || (
+          resource.data.doctorLic is string
+          && doctorOwner(resource.data.doctorLic)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'visit', 'status', 'updatedAt'
+          ])
+        )
+      );
+
+      allow delete: if false;
+
+      match /private/{privateId} {
+        function parentBooking() {
+          return get(/databases/$(database)/documents/bookings/$(bookingId)).data;
+        }
+
+        allow read: if signedIn() && (
+          parentBooking().patientUid == request.auth.uid
+          || (
+            parentBooking().sharedHealth == true
+            && parentBooking().doctorLic is string
+            && doctorOwner(parentBooking().doctorLic)
+          )
+        );
+
+        allow create, update: if signedIn()
+          && parentBooking().patientUid == request.auth.uid
+          && privateId == 'health'
+          && parentBooking().sharedHealth == true;
+
+        allow delete: if signedIn()
+          && parentBooking().patientUid == request.auth.uid;
+      }
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
