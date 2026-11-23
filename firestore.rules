@@ -154,10 +154,12 @@ service cloud.firestore {
       allow create: if signedIn() && (
         (
           request.resource.data.uid == request.auth.uid
+          && request.resource.data.verified == false
           && getAfter(/databases/$(database)/documents/doctorKeys/$(lic)).data.phone == phoneNumber()
         )
         || (
           request.resource.data.uid == ''
+          && request.resource.data.verified == false
           && request.resource.data.createdBy is string
           && request.resource.data.createdBy != ''
           && centerManager(request.resource.data.createdBy)
@@ -245,7 +247,15 @@ service cloud.firestore {
         )
         || (
           doctorOwner(resource.data.lic)
-          && (request.resource.data.status != 'active' || approvedCenter(resource.data.centerId))
+          && (
+            request.resource.data.status == resource.data.status
+            || request.resource.data.status == 'removed'
+            || (
+              resource.data.status == 'invitedByCenter'
+              && request.resource.data.status == 'active'
+              && approvedCenter(resource.data.centerId)
+            )
+          )
           && request.resource.data.centerId == resource.data.centerId
           && request.resource.data.lic == resource.data.lic
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -312,7 +322,11 @@ service cloud.firestore {
           && request.resource.data.visit is map
           && request.resource.data.visit.state in [0, 1, 2, 3]
           && request.resource.data.visit.arrived is bool
-          && request.resource.data.status in ['مؤكد', 'مكتمل']
+          && resource.data.status in ['مؤكد', 'مكتمل']
+          && (
+            request.resource.data.status == resource.data.status
+            || (request.resource.data.visit.state == 2 && request.resource.data.status == 'مكتمل')
+          )
         )
       );
 
