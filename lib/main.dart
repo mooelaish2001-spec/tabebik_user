@@ -2850,7 +2850,7 @@ class _OnboardingState extends State<OnboardingScreen> {
       );
 }
 
-// ───────────────────────── 3. Login / OTP / Register ─────────────────────────
+// ───────────────────────── 3. Login / Passkey / Register ─────────────────────────
 Widget authHeader({double height = 270}) => Container(
       height: height,
       width: double.infinity,
@@ -2935,7 +2935,6 @@ String fmtTime(int m) {
 /// بيانات العرض التجريبية (حجوزات وعناوين وعائلة...). للإنتاج: --dart-define=DEMO_DATA=false
 const kDemoData = bool.fromEnvironment('DEMO_DATA', defaultValue: true);
 
-/// يعرض رمز التحقق على الشاشة (لا SMS فعلية في هذه النسخة). للإنتاج: --dart-define=DEMO_OTP=false
 // ───────────────────────── تخزين الجهاز (تسجيل مرة واحدة كالواتساب) ─────────────────────────
 abstract class StoreBackend {
   String? read(String key);
