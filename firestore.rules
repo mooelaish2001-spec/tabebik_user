@@ -50,6 +50,8 @@ service cloud.firestore {
 
     function doctorPhoneOwner(lic) {
       return signedIn()
+        && request.auth.token.get('role', null) == 'doctor'
+        && request.auth.token.get('professionalId', null) == lic
         && lic is string
         && lic != ''
         && phoneNumber() != null
