@@ -42,9 +42,23 @@ class PasskeyAuthService {
     final options = Map<String, dynamic>.from(start['options'] as Map);
     final challenge = options['challenge'] as String;
 
-    final credential = await _authenticator.register(
+    final platformCredential = await _authenticator.register(
       RegisterRequestType.fromJson(options),
     );
+    final raw = platformCredential.toJson();
+    // Convert the Flutter plugin's flattened response to the standard
+    // PublicKeyCredential JSON shape expected by SimpleWebAuthn.
+    final credential = <String, dynamic>{
+      'id': raw['id'],
+      'rawId': raw['rawId'],
+      'type': 'public-key',
+      'response': {
+        'clientDataJSON': raw['clientDataJSON'],
+        'attestationObject': raw['attestationObject'],
+        'transports': raw['transports'] ?? <String>[],
+      },
+      'clientExtensionResults': raw['clientExtensionResults'] ?? <String, dynamic>{},
+    };
 
     final finish = await _post('passkeyRegisterVerify', {
       'app': _app,
@@ -60,13 +74,26 @@ class PasskeyAuthService {
     final options = Map<String, dynamic>.from(start['options'] as Map);
     final challenge = start['challenge'] as String;
 
-    final credential = await _authenticator.authenticate(
+    final platformCredential = await _authenticator.authenticate(
       AuthenticateRequestType.fromJson(
         options,
         mediation: MediationType.Optional,
         preferImmediatelyAvailableCredentials: false,
       ),
     );
+    final raw = platformCredential.toJson();
+    final credential = <String, dynamic>{
+      'id': raw['id'],
+      'rawId': raw['rawId'],
+      'type': 'public-key',
+      'response': {
+        'clientDataJSON': raw['clientDataJSON'],
+        'authenticatorData': raw['authenticatorData'],
+        'signature': raw['signature'],
+        'userHandle': raw['userHandle'],
+      },
+      'clientExtensionResults': raw['clientExtensionResults'] ?? <String, dynamic>{},
+    };
 
     final finish = await _post('passkeyLoginVerify', {
       'app': _app,
