@@ -18,6 +18,9 @@ const auth = getAuth();
 const RP_NAME = "طبيبك";
 const RP_ID = "tabibek-2f25e.web.app";
 const ORIGIN = "https://tabibek-2f25e.web.app";
+// Android native WebAuthn origin: base64url(SHA-256 signing-certificate bytes).
+const ANDROID_ORIGIN = "android:apk-key-hash:D2CHqKEuCwIW-pdnnUc03LM0u-4pDhHp7RZeMO0gFS4";
+const EXPECTED_ORIGINS = [ORIGIN, ANDROID_ORIGIN];
 const REGION = "us-central1";
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 const ALLOWED_APPS = new Set(["tabebik_user", "tabebik_center", "tabebik_doctor"]);
@@ -181,7 +184,7 @@ export const passkeyRegisterVerify = onRequest({ region: REGION, cors: false, ma
     const verification = await verifyRegistrationResponse({
       response,
       expectedChallenge: challengeData.challenge,
-      expectedOrigin: ORIGIN,
+      expectedOrigin: EXPECTED_ORIGINS,
       expectedRPID: RP_ID,
       requireUserVerification: true,
     });
