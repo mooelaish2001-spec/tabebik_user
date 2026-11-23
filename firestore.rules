@@ -23,6 +23,14 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/centerMembers/$(phoneNumber())).data.role == 0;
     }
 
+    function canManageBookings(centerId) {
+      return centerMember(centerId)
+        && (
+          get(/databases/$(database)/documents/centerMembers/$(phoneNumber())).data.role == 0
+          || get(/databases/$(database)/documents/centerMembers/$(phoneNumber())).data.perms.hasAny([0])
+        );
+    }
+
     function doctorOwner(lic) {
       return signedIn()
         && lic is string
@@ -86,7 +94,6 @@ service cloud.firestore {
         || centerMember(resource.data.centerId)
       );
 
-      // Manager's initial membership is created atomically with the center.
       allow create: if signedIn() && (
         (
           memberPhone == phoneNumber()
@@ -98,7 +105,6 @@ service cloud.firestore {
         || (request.resource.data.centerId is string && centerManager(request.resource.data.centerId))
       );
 
-      // A verified phone may claim an unbound staff record once; managers manage staff.
       allow update: if signedIn() && (
         (
           memberPhone == phoneNumber()
@@ -141,11 +147,19 @@ service cloud.firestore {
         )
       );
 
-      allow update: if doctorOwner(lic)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'name', 'spec', 'sub', 'grade', 'quals', 'qualsList', 'exp',
-          'female', 'bio', 'accepting', 'uid', 'claimed', 'updatedAt'
-        ]);
+      allow update: if (
+        doctorOwner(lic)
+        || (
+          signedIn()
+          && resource.data.uid == ''
+          && doctorPhoneOwner(lic)
+          && request.resource.data.uid == request.auth.uid
+        )
+      )
+      && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'name', 'spec', 'sub', 'grade', 'quals', 'qualsList', 'exp',
+        'female', 'bio', 'accepting', 'uid', 'claimed', 'updatedAt'
+      ]);
 
       allow delete: if doctorOwner(lic);
     }
@@ -241,7 +255,7 @@ service cloud.firestore {
         )
         || (
           resource.data.centerId is string
-          && centerManager(resource.data.centerId)
+          && canManageBookings(resource.data.centerId)
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'status', 'note', 'assigned', 'pay', 'updatedAt'
           ])
