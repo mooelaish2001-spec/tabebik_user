@@ -58,6 +58,75 @@ class Fb {
     }
   }
 
+  // ───────────────────────── Firebase Phone Auth (SMS OTP) ─────────────────────────
+  static String? _verificationId;
+  static int? _resendToken;
+
+  static Future<void> sendCode(
+    String phone, {
+    required void Function() onSent,
+    required void Function(String) onError,
+    void Function()? onAuto,
+  }) async {
+    if (!on) {
+      onError('خدمة التحقق غير مهيّأة');
+      return;
+    }
+    try {
+      await _auth.verifyPhoneNumber(
+        phoneNumber: phone,
+        timeout: const Duration(seconds: 60),
+        forceResendingToken: _resendToken,
+        verificationCompleted: (credential) async {
+          try {
+            await _auth.signInWithCredential(credential);
+            onAuto?.call();
+          } on FirebaseAuthException catch (e) {
+            onError(e.message ?? 'تعذّر إكمال التحقق التلقائي');
+          }
+        },
+        verificationFailed: (e) {
+          onError(e.message ?? 'تعذّر إرسال رمز التحقق (${e.code})');
+        },
+        codeSent: (verificationId, resendToken) {
+          _verificationId = verificationId;
+          _resendToken = resendToken;
+          onSent();
+        },
+        codeAutoRetrievalTimeout: (verificationId) {
+          _verificationId = verificationId;
+        },
+      );
+    } on FirebaseAuthException catch (e) {
+      onError(e.message ?? 'تعذّر إرسال رمز التحقق (${e.code})');
+    } catch (_) {
+      onError('تعذّر الاتصال بخدمة التحقق. حاول مجدداً.');
+    }
+  }
+
+  static Future<String?> verify(String code) async {
+    final id = _verificationId;
+    if (!on || id == null) return 'انتهت جلسة التحقق. أعد إرسال الرمز.';
+    try {
+      final credential = PhoneAuthProvider.credential(
+        verificationId: id,
+        smsCode: code,
+      );
+      await _auth.signInWithCredential(credential);
+      _verificationId = null;
+      return null;
+    } on FirebaseAuthException catch (e) {
+      return switch (e.code) {
+        'invalid-verification-code' => 'رمز التحقق غير صحيح',
+        'session-expired' => 'انتهت صلاحية الرمز. أعد إرساله.',
+        'too-many-requests' => 'محاولات كثيرة. انتظر قليلاً ثم حاول.',
+        _ => e.message ?? 'تعذّر التحقق من الرمز',
+      };
+    } catch (_) {
+      return 'تعذّر التحقق من الرمز. تحقق من الاتصال وحاول مجدداً.';
+    }
+  }
+
   // ───────────────────────── تحويلات ─────────────────────────
   static dynamic _plain(dynamic v) {
     if (v is Timestamp) return v.millisecondsSinceEpoch;
