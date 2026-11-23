@@ -3305,6 +3305,16 @@ class HomeScreen extends StatelessWidget {
                     ])), chev(),
                   ]),
                 )),
+                Tap(onTap: () => go(c, const MyFollowUpsScreen()), child: Container(
+                  margin: const EdgeInsets.only(bottom: 18), padding: const EdgeInsets.all(16), decoration: cardBox(20),
+                  child: Row(children: [
+                    gTile(Icons.folder_open_rounded, size: 48, color: kTeal), gapW(12),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('متابعاتي', style: t(14)),
+                      Text('عرض الزيارات المرتبطة بكود الإثبات', style: t(11.5, w: FontWeight.w500, c: kGrey)),
+                    ])), chev(),
+                  ]),
+                )),
                 secRow('أطباء مميزون', more: 'عرض الكل', onMore: () => go(c, const DoctorListScreen())),
                 SizedBox(
                   height: 176,
@@ -3374,6 +3384,8 @@ class _EncounterCodeScreenState extends State<EncounterCodeScreen> {
         tileIcon(Icons.verified_rounded, size: 62, color: kGreen), gap(10),
         Text('تم ربط إثبات المقابلة بنجاح', textAlign: TextAlign.center, style: t(17, c: kGreenDk)),
         if (encounterId != null) Text('رقم المتابعة: $encounterId', textAlign: TextAlign.center, style: t(12, c: kGrey)),
+        gap(14),
+        RedButton('عرض متابعاتي', icon: Icons.folder_open_rounded, onTap: () => go(context, const MyFollowUpsScreen())),
       ] else ...[
         TextField(controller: ctl, keyboardType: TextInputType.number, textAlign: TextAlign.center, maxLength: 6,
           inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
@@ -3389,6 +3401,88 @@ class _EncounterCodeScreenState extends State<EncounterCodeScreen> {
       Container(padding: const EdgeInsets.all(14), decoration: BoxDecoration(color: kBlueBg, borderRadius: BorderRadius.circular(16)),
         child: Text('الرمز صالح لمدة 24 ساعة ويُستخدم مرة واحدة، ولا يقبله النظام إلا لحساب المريض المرتبط بالحجز.', textAlign: TextAlign.center, style: t(12, w: FontWeight.w500, c: kSub, h: 1.6))),
     ]),
+  );
+}
+
+// ───────────────────────── متابعات المريض ─────────────────────────
+class MyFollowUpsScreen extends StatefulWidget {
+  const MyFollowUpsScreen({super.key});
+  @override
+  State<MyFollowUpsScreen> createState() => _MyFollowUpsScreenState();
+}
+
+class _MyFollowUpsScreenState extends State<MyFollowUpsScreen> {
+  bool busy = true;
+  String? error;
+  List<Map<String, dynamic>> rows = [];
+
+  @override
+  void initState() {
+    super.initState();
+    load();
+  }
+
+  Future<void> load() async {
+    if (!firebaseReady || FirebaseAuth.instance.currentUser == null) {
+      if (mounted) setState(() { busy = false; error = 'سجّل الدخول واتصل بالخادم لعرض متابعاتك.'; });
+      return;
+    }
+    if (mounted) setState(() { busy = true; error = null; });
+    try {
+      final result = await FirebaseFunctions.instance.httpsCallable('listPatientFollowUps').call();
+      final data = Map<String, dynamic>.from(result.data as Map);
+      final list = (data['followUps'] as List? ?? const [])
+          .whereType<Map>()
+          .map((x) => Map<String, dynamic>.from(x))
+          .toList();
+      if (mounted) setState(() { rows = list; busy = false; });
+    } catch (e) {
+      if (mounted) setState(() { busy = false; error = 'تعذر تحميل المتابعات من الخادم.'; });
+      debugPrint('Patient follow-ups load failed: $e');
+    }
+  }
+
+  String visitDate(Map<String, dynamic> row) {
+    final iso = (row['dateIso'] ?? '').toString();
+    if (iso.isEmpty) return 'تاريخ الزيارة غير متاح';
+    final time = (row['timeMin'] as num?)?.toInt() ?? 0;
+    final hour = time ~/ 60;
+    final minute = time % 60;
+    return '$iso · ${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) => RedPage(
+    title: 'متابعاتي',
+    body: busy
+        ? const Center(child: CircularProgressIndicator(color: kRed))
+        : error != null
+            ? EmptyState(Icons.cloud_off_rounded, 'تعذر عرض المتابعات', error!, btn: 'إعادة المحاولة', onTap: load)
+            : rows.isEmpty
+                ? EmptyState(Icons.fact_check_outlined, 'لا توجد متابعات مرتبطة', 'بعد المقابلة الحضورية، أدخل كود الإثبات الذي يعطيك الطبيب.')
+                : ListView(padding: const EdgeInsets.all(16), children: [
+                    for (final row in rows)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(15),
+                        decoration: cardBox(20),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Row(children: [
+                            tileIcon(Icons.medical_services_rounded, size: 42, color: kTeal, bg: kTealBg),
+                            gapW(10),
+                            Expanded(child: two(
+                              (row['doctorName'] ?? '').toString().isEmpty ? 'الطبيب' : 'د. ${row['doctorName']}',
+                              (row['centerName'] ?? '').toString(),
+                            )),
+                            pillOk('مرتبطة'),
+                          ]),
+                          const Divider(height: 22, color: kLine),
+                          kv('موعد الزيارة', visitDate(row)),
+                          kv('رقم المتابعة', (row['bookingId'] ?? row['id'] ?? '').toString()),
+                        ]),
+                      ),
+                    panel([Text('هذه الصفحة تعرض ربط الزيارة الحضورية فقط. تفاصيل الفحوصات ورفع الملفات الطبية تحتاج استكمال مسار المتابعة الآمن قبل تفعيلها.', style: t(12, w: FontWeight.w500, c: kSub, h: 1.7))]),
+                  ]),
   );
 }
 
