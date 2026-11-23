@@ -15,8 +15,8 @@ before enabling the client flow. Never change RP ID after passkeys are enrolled.
 
 ## Endpoints
 
-- `passkeyRegisterOptions` — patient self-registration only
-- `passkeyRegisterVerify` — verify credential and issue Firebase custom token
+- `passkeyRegisterOptions` — patient, center manager/staff, and new doctor identity registration
+- `passkeyRegisterVerify` — verify credential, enforce app identity uniqueness, and issue Firebase custom token
 - `passkeyLoginOptions` — discoverable passkey challenge
 - `passkeyLoginVerify` — verify assertion and issue Firebase custom token
 
