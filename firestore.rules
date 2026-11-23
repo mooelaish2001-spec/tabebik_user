@@ -218,7 +218,10 @@ service cloud.firestore {
         )
         || (
           request.resource.data.initiatedBy == 'doctor'
-          && approvedCenter(request.resource.data.centerId)
+          && (
+            (request.resource.data.status == 'offApp' && request.resource.data.centerId == '')
+            || approvedCenter(request.resource.data.centerId)
+          )
           && doctorOwner(request.resource.data.lic)
         )
       );
@@ -242,7 +245,7 @@ service cloud.firestore {
           && request.resource.data.lic == resource.data.lic
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'status', 'fee', 'days', 'from', 'to', 'kind', 'city', 'place',
-            'address', 'centerPhone', 'invites', 'initiatedBy', 'doc', 'updatedAt'
+            'centerName', 'address', 'centerPhone', 'invites', 'initiatedBy', 'doc', 'updatedAt'
           ])
         )
       );
