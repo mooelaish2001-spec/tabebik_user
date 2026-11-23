@@ -171,7 +171,7 @@ export const passkeyRegisterVerify = onRequest({ region: REGION, cors: false, ma
     const app = getApp(req);
     const response = req.body?.credential;
     const challenge = String(req.body?.challenge ?? "");
-    if (app !== "tabebik_user" || !assertPayload(challenge, 200) || !response || !assertPayload(response.id, 2048)) {
+    if (!ALLOWED_APPS.has(app) || !assertPayload(challenge, 200) || !response || !assertPayload(response.id, 2048)) {
       return send(res, 400, { error: "invalid-registration-response" });
     }
     const challengeSnap = await db.collection("passkeyChallenges").doc(challenge).get();
