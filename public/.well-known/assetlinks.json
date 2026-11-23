@@ -1,0 +1,38 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.get_login_creds"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.tabebik.tabebik_user",
+      "sha256_cert_fingerprints": [
+        "0F:60:87:A8:A1:2E:0B:02:16:FA:97:67:9D:47:34:DC:B3:34:BB:EE:29:0E:11:E9:ED:16:5E:30:ED:20:15:2E"
+      ]
+    }
+  },
+  {
+    "relation": [
+      "delegate_permission/common.get_login_creds"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.tabebik.tabebik_center",
+      "sha256_cert_fingerprints": [
+        "0F:60:87:A8:A1:2E:0B:02:16:FA:97:67:9D:47:34:DC:B3:34:BB:EE:29:0E:11:E9:ED:16:5E:30:ED:20:15:2E"
+      ]
+    }
+  },
+  {
+    "relation": [
+      "delegate_permission/common.get_login_creds"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.tabebik.tabebik_doctor",
+      "sha256_cert_fingerprints": [
+        "0F:60:87:A8:A1:2E:0B:02:16:FA:97:67:9D:47:34:DC:B3:34:BB:EE:29:0E:11:E9:ED:16:5E:30:ED:20:15:2E"
+      ]
+    }
+  }
+]
