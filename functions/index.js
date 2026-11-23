@@ -66,7 +66,9 @@ function getApp(req) {
 }
 
 function clientKey(req) {
-  const ip = String(req.headers["x-forwarded-for"] ?? req.ip ?? "unknown").split(",")[0].trim();
+  // Use the platform-normalized client IP; do not trust a caller-supplied
+  // X-Forwarded-For value as the sole rate-limit identity.
+  const ip = String(req.ip ?? "unknown");
   return createHash("sha256").update(ip).digest("hex");
 }
 
@@ -89,10 +91,10 @@ function assertPayload(value, max = 100) {
   return typeof value === "string" && value.trim().length > 0 && value.length <= max;
 }
 
-async function saveChallenge({ challenge, uid, type, app }) {
+async function saveChallenge({ challenge, uid, type, app, displayName = "" }) {
   const ref = db.collection("passkeyChallenges").doc(challenge);
   await ref.create({
-    challenge, uid, type, app,
+    challenge, uid, type, app, displayName,
     createdAt: FieldValue.serverTimestamp(),
     expiresAt: Timestamp.fromMillis(Date.now() + CHALLENGE_TTL_MS),
     consumed: false,
@@ -142,7 +144,7 @@ export const passkeyRegisterOptions = onRequest({ region: REGION, cors: false, m
       },
       timeout: CHALLENGE_TTL_MS,
     });
-    await saveChallenge({ challenge: options.challenge, uid, type: "registration", app });
+    await saveChallenge({ challenge: options.challenge, uid, type: "registration", app, displayName });
     return send(res, 200, { uid, options });
   } catch (error) {
     console.error("passkeyRegisterOptions failed", error);
@@ -165,6 +167,7 @@ export const passkeyRegisterVerify = onRequest({ region: REGION, cors: false, ma
     if (challengeData.type !== "registration" || challengeData.app !== app || challengeData.consumed || challengeData.expiresAt.toMillis() < Date.now()) {
       return send(res, 400, { error: "challenge-expired" });
     }
+    if (!(await rateLimit(req, "register-verify", 10, 60 * 60 * 1000))) return send(res, 429, { error: "rate-limited" });
     const verification = await verifyRegistrationResponse({
       response,
       expectedChallenge: challengeData.challenge,
@@ -202,14 +205,21 @@ export const passkeyRegisterVerify = onRequest({ region: REGION, cors: false, ma
       tx.create(accountRef, {
         uid: challengeData.uid,
         role: "patient",
-        displayName: String(req.body?.displayName ?? "").trim().slice(0, 80),
+        displayName: String(challengeData.displayName ?? "").trim().slice(0, 80),
         app,
         status: "active",
         createdAt: FieldValue.serverTimestamp(),
       });
     });
 
-    await auth.createUser({ uid: challengeData.uid, displayName: String(req.body?.displayName ?? "").trim().slice(0, 80) });
+    const displayName = String(challengeData.displayName ?? "").trim().slice(0, 80);
+    try {
+      await auth.createUser({ uid: challengeData.uid, displayName });
+    } catch (error) {
+      // Roll back Firestore credential/account records if Firebase Auth creation fails.
+      await Promise.all([passkeyRef.delete(), accountRef.delete()]);
+      throw error;
+    }
     const token = await auth.createCustomToken(challengeData.uid, { role: "patient", authMethod: "passkey" });
     return send(res, 200, { verified: true, uid: challengeData.uid, customToken: token });
   } catch (error) {
@@ -246,6 +256,7 @@ export const passkeyLoginVerify = onRequest({ region: REGION, cors: false, maxIn
     if (!app || !assertPayload(challenge, 200) || !response || !assertPayload(response.id, 2048)) {
       return send(res, 400, { error: "invalid-authentication-response" });
     }
+    if (!(await rateLimit(req, "login-verify", 40, 15 * 60 * 1000))) return send(res, 429, { error: "rate-limited" });
     const challengeRef = db.collection("passkeyChallenges").doc(challenge);
     const challengeSnap = await challengeRef.get();
     if (!challengeSnap.exists) return send(res, 401, { error: "challenge-expired" });
@@ -258,7 +269,7 @@ export const passkeyLoginVerify = onRequest({ region: REGION, cors: false, maxIn
     if (matches.empty) return send(res, 401, { error: "passkey-not-found" });
     const credentialDoc = matches.docs[0];
     const stored = credentialDoc.data();
-    if (stored.app !== app && !(app !== "tabebik_user" && stored.role === app)) {
+    if (stored.app !== app) {
       return send(res, 403, { error: "passkey-app-mismatch" });
     }
     const verification = await verifyAuthenticationResponse({
