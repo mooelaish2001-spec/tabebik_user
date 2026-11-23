@@ -83,14 +83,14 @@ service cloud.firestore {
       allow update: if centerManager(centerId)
         && (
           request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'name', 'kind', 'city', 'hood', 'address', 'phone', 'from', 'to',
+            'name', 'kind', 'state', 'city', 'hood', 'address', 'phone', 'from', 'to',
             'hours', 'daysText', 'svc', 'licensePath', 'updatedAt'
           ])
           || (
             resource.data.status == 2
             && request.resource.data.status == 0
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-              'name', 'kind', 'city', 'hood', 'address', 'phone', 'from', 'to',
+              'name', 'kind', 'state', 'city', 'hood', 'address', 'phone', 'from', 'to',
               'hours', 'daysText', 'svc', 'licensePath', 'updatedAt', 'status',
               'reqNo', 'reason'
             ])
