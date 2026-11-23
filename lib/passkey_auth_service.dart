@@ -135,7 +135,7 @@ class PasskeyAuthService {
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final code = data['error'];
-      throw PasskeyAuthException(_messageFor(code is String ? code : 'unknown'));
+      throw PasskeyAuthException(_messageFor(code is String ? code : 'unknown'), code: code is String ? code : 'unknown');
     }
     return data;
   }
@@ -161,8 +161,9 @@ class PasskeyAuthService {
 }
 
 class PasskeyAuthException implements Exception {
-  const PasskeyAuthException(this.message);
+  const PasskeyAuthException(this.message, {this.code = 'unknown'});
   final String message;
+  final String code;
   @override
   String toString() => message;
 }
