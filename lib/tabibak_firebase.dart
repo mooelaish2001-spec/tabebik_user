@@ -52,6 +52,8 @@ class Fb {
     try {
       await Firebase.initializeApp();
       on = true;
+      // Wait until Firebase restores the persisted Passkey-authenticated user.
+      await _auth.authStateChanges().first;
     } catch (e) {
       initError = '$e';
       on = false;
