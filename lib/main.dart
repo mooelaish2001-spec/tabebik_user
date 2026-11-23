@@ -3159,6 +3159,11 @@ class _LoginState extends State<LoginScreen> {
 
   Future<void> signIn() async {
     if (busy) return;
+    final phone = normPhone(ph.text);
+    if (phone == null) {
+      setState(() => err = 'أدخل رقم الهاتف المرتبط بحسابك.');
+      return;
+    }
     if (!Fb.on) {
       setState(() => err = 'الاتصال بخدمة الحسابات غير متاح حالياً. حاول عند توفر الإنترنت.');
       return;
@@ -3169,6 +3174,11 @@ class _LoginState extends State<LoginScreen> {
     });
     try {
       await passkey.signIn();
+      final accountPhone = (passkey.accountData['phone'] ?? '').toString();
+      if (accountPhone != phone) {
+        await Fb.signOut();
+        throw const PasskeyAuthException('مفتاح المرور الذي اخترته لا يطابق رقم الهاتف المدخل.');
+      }
       final found = await app.afterSignIn();
       if (!found) {
         await Fb.signOut();
