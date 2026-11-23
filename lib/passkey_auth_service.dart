@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:passkeys/authenticator.dart';
 import 'package:passkeys/exceptions.dart';
@@ -15,7 +16,7 @@ class PasskeyAuthService {
     PasskeyAuthenticator? authenticator,
   })  : _firebaseAuth = firebaseAuth ?? FirebaseAuth.instance,
         _http = httpClient ?? http.Client(),
-        _authenticator = authenticator ?? PasskeyAuthenticator();
+        _authenticator = authenticator ?? PasskeyAuthenticator(debugMode: kDebugMode);
 
   static const String _baseUrl =
       'https://us-central1-tabibek-2f25e.cloudfunctions.net';
