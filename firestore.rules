@@ -132,12 +132,6 @@ service cloud.firestore {
 
       allow update: if signedIn() && (
         (
-          memberPhone == phoneNumber()
-          && resource.data.uid == ''
-          && request.resource.data.uid == request.auth.uid
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['uid'])
-        )
-        || (
           centerManager(resource.data.centerId)
           && (request.resource.data.status != 'active' || approvedCenter(resource.data.centerId))
           && request.resource.data.centerId == resource.data.centerId
