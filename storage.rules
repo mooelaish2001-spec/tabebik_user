@@ -1,28 +1,57 @@
 rules_version = '2';
 
-// قواعد Firebase Storage: إشعارات التحويل وتراخيص المراكز.
 service firebase.storage {
   match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function phoneNumber() {
+      return signedIn() ? request.auth.token.phone_number : null;
+    }
+
+    function centerMember(centerId) {
+      return signedIn()
+        && phoneNumber() != null
+        && firestore.exists(/databases/(default)/documents/centerMembers/$(phoneNumber()))
+        && firestore.get(/databases/(default)/documents/centerMembers/$(phoneNumber())).data.centerId == centerId
+        && firestore.get(/databases/(default)/documents/centerMembers/$(phoneNumber())).data.active == true;
+    }
+
+    function centerManager(centerId) {
+      return centerMember(centerId)
+        && firestore.get(/databases/(default)/documents/centerMembers/$(phoneNumber())).data.role == 0;
+    }
 
     function booking(bid) {
       return firestore.get(/databases/(default)/documents/bookings/$(bid)).data;
     }
-    function isImage() {
-      return request.resource.size < 6 * 1024 * 1024 && request.resource.contentType.matches('image/.*');
+
+    function imageUpload() {
+      return request.resource != null
+        && request.resource.size < 6 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
     }
 
-    // إشعار التحويل: يرفعه صاحب الحجز، ويراه هو ومستخدمو المركز المعني.
-    match /receipts/{bid}/{file} {
-      allow write: if request.auth != null && isImage() && booking(bid).patientUid == request.auth.uid;
-      allow read: if request.auth != null && (
-        booking(bid).patientUid == request.auth.uid
-        || firestore.get(/databases/(default)/documents/centerMembers/$(request.auth.token.phone_number)).data.centerId == booking(bid).centerId);
+    match /receipts/{bookingId}/{fileName} {
+      allow write: if signedIn()
+        && imageUpload()
+        && booking(bookingId).patientUid == request.auth.uid;
+
+      allow read: if signedIn() && (
+        booking(bookingId).patientUid == request.auth.uid
+        || (booking(bookingId).centerId is string && centerMember(booking(bookingId).centerId))
+      );
     }
 
-    // ترخيص المركز: يُرفع عند التسجيل ولا يُقرأ إلا من لوحة Firebase (فريق طبيبك).
-    match /licenses/{file} {
-      allow write: if request.auth != null && isImage();
+    match /licenses/{centerId}/{fileName} {
+      allow write: if centerManager(centerId) && imageUpload();
+      // Licenses remain private to the platform's review process.
       allow read: if false;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
     }
   }
 }
