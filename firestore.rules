@@ -7,7 +7,9 @@ service cloud.firestore {
     }
 
     function phoneNumber() {
-      return signedIn() ? request.auth.token.phone_number : null;
+      return signedIn()
+        ? request.auth.token.get('accountPhone', request.auth.token.get('phone_number', null))
+        : null;
     }
 
     function centerMember(centerId) {
