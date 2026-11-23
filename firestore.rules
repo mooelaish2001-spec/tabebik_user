@@ -53,6 +53,11 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/centers/$(centerId)).data.status == 1;
     }
 
+    function activeMembership(lic, centerId) {
+      return exists(/databases/$(database)/documents/memberships/$(lic)_$(centerId))
+        && get(/databases/$(database)/documents/memberships/$(lic)_$(centerId)).data.status == 'active';
+    }
+
     function canReadBooking(data) {
       return signedIn() && (
         data.patientUid == request.auth.uid
@@ -258,7 +263,13 @@ service cloud.firestore {
         && request.resource.data.patientUid == request.auth.uid
         && request.resource.data.centerId is string
         && approvedCenter(request.resource.data.centerId)
-        && request.resource.data.status in ['جديد', 'قيد التأكيد'];
+        && (
+          request.resource.data.doctorLic == ''
+          || activeMembership(request.resource.data.doctorLic, request.resource.data.centerId)
+        )
+        && request.resource.data.status in ['جديد', 'قيد التأكيد']
+        && request.resource.data.pay.state == 'none'
+        && request.resource.data.sharedHealth is bool;
 
       allow read: if canReadBooking(resource.data);
 
@@ -269,6 +280,21 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'status', 'day', 'time', 'timeMin', 'dateIso', 'pay', 'updatedAt'
           ])
+          && (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status'])
+            || request.resource.data.status in ['ملغي', 'جديد']
+          )
+          && (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['pay'])
+            || (
+              request.resource.data.pay.state == 'sent'
+              && request.resource.data.pay.receiptUrl is string
+              && request.resource.data.pay.sentAt is number
+              && request.resource.data.pay.diff(resource.data.pay).affectedKeys().hasOnly([
+                'state', 'receiptUrl', 'sentAt', 'note'
+              ])
+            )
+          )
         )
         || (
           resource.data.centerId is string
@@ -283,6 +309,10 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'visit', 'status', 'updatedAt'
           ])
+          && request.resource.data.visit is map
+          && request.resource.data.visit.state in [0, 1, 2, 3]
+          && request.resource.data.visit.arrived is bool
+          && request.resource.data.status in ['مؤكد', 'مكتمل']
         )
       );
 
