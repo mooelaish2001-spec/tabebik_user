@@ -16,8 +16,8 @@ android {
 
     defaultConfig {
         applicationId = "com.tabebik.tabebik_user"
-        // Firebase Auth requires minSdk 23 or higher.
-        minSdk = maxOf(flutter.minSdkVersion, 23)
+        // Android Credential Manager passkeys require Android 9 (API 28) or higher.
+        minSdk = maxOf(flutter.minSdkVersion, 28)
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
