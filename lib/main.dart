@@ -1494,6 +1494,7 @@ class Appt {
   final String centerId, phone;
   String complaint;
   final bool sharedHealth;
+  String remoteId = ''; // Firestore booking ID returned by the trusted booking callable.
 
   bool get upcoming => status == 'مؤكد' || status == 'قيد التأكيد' || status == 'قيد التنفيذ';
   String get code => 'TB-${20400 + id}';
@@ -1736,20 +1737,19 @@ class AppState extends ChangeNotifier {
     if (n != null) notifs.insert(0, n);
     notifyListeners();
 
-    // إنشاء حجز مشترك ليظهر في تطبيق المركز والطبيب.
+    // إنشاء الحجز عبر الخادم؛ Firestore client writes مغلقة، والـ callable
+    // يضيف patientUid بنفسه ويرفض أي شكوى أو تشخيص أو بيانات طبية.
     final user = firebaseReady ? FirebaseAuth.instance.currentUser : null;
     if (user != null) {
-      final ref = FirebaseFirestore.instance.collection('bookings').doc();
-      ref.set({
-        ...a.toPlatform(),
-        'patientUid': user.uid,
-        'patientPhone': user.phoneNumber ?? phone,
-        'patientName': name,
-        'bookingId': ref.id,
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      }).catchError((e) {
-        debugPrint('Firebase booking create failed: $e');
+      FirebaseFunctions.instance
+          .httpsCallable('createPatientBooking')
+          .call(a.toPlatform())
+          .then((result) {
+        final data = Map<String, dynamic>.from(result.data as Map);
+        a.remoteId = (data['bookingId'] ?? '').toString();
+        notifyListeners();
+      }).catchError((Object e) {
+        debugPrint('Secure booking creation failed: $e');
       });
     } else {
       debugPrint('Booking not uploaded: patient is not authenticated.');
