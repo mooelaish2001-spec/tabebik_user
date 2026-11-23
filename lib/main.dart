@@ -3111,7 +3111,7 @@ class LoginScreen extends StatefulWidget {
 class _LoginState extends State<LoginScreen> {
   final ph = TextEditingController();
   final nm = TextEditingController();
-  final passkey = PasskeyAuthService();
+  final passkey = PasskeyAuthService(app: 'tabebik_user');
   String? err;
   bool busy = false;
 
@@ -3144,7 +3144,7 @@ class _LoginState extends State<LoginScreen> {
       err = null;
     });
     try {
-      await passkey.registerPatient(displayName: name);
+      await passkey.registerAccount(displayName: name, phone: phone);
       app.createAccount(phone, name);
       app.ping();
       if (mounted) {
