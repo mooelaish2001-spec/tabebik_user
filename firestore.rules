@@ -218,6 +218,7 @@ service cloud.firestore {
         )
         || (
           request.resource.data.initiatedBy == 'doctor'
+          && approvedCenter(request.resource.data.centerId)
           && doctorOwner(request.resource.data.lic)
         )
       );
@@ -225,6 +226,7 @@ service cloud.firestore {
       allow update: if signedIn() && (
         (
           centerManager(resource.data.centerId)
+          && (request.resource.data.status != 'active' || approvedCenter(resource.data.centerId))
           && request.resource.data.centerId == resource.data.centerId
           && request.resource.data.lic == resource.data.lic
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
