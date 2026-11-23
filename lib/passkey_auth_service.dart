@@ -53,9 +53,18 @@ class PasskeyAuthService {
     options['authenticatorSelection'] = selection;
     final challenge = options['challenge'] as String;
 
-    final platformCredential = await _authenticator.register(
-      RegisterRequestType.fromJson(options),
-    );
+    late final RegisterResponseType platformCredential;
+    try {
+      platformCredential = await _authenticator.register(
+        RegisterRequestType.fromJson(options),
+      );
+    } on MissingGoogleSignInException {
+      throw const PasskeyAuthException('سجّل الدخول إلى حساب Google على الجهاز حتى يتمكن مدير كلمات المرور من حفظ مفتاح المرور.');
+    } on DomainNotAssociatedException {
+      throw const PasskeyAuthException('لم يتم تفعيل ربط التطبيق بنطاق مفاتيح المرور بعد. أعد المحاولة بعد نشر ملف الربط.');
+    } on PasskeyUnsupportedException {
+      throw const PasskeyAuthException('هذا الجهاز لا يدعم مفاتيح المرور. يلزم Android 9 أو أحدث مع قفل شاشة.');
+    }
     final raw = platformCredential.toJson();
     final credential = <String, dynamic>{
       'id': raw['id'],
@@ -119,6 +128,12 @@ class PasskeyAuthService {
         'لا يوجد مفتاح مرور محفوظ لهذا الحساب على الجهاز أو حساب Google.',
         code: 'passkey-not-found',
       );
+    } on MissingGoogleSignInException {
+      throw const PasskeyAuthException('سجّل الدخول إلى حساب Google على الجهاز لاستخدام مفاتيح المرور.');
+    } on DomainNotAssociatedException {
+      throw const PasskeyAuthException('لم يتم تفعيل ربط التطبيق بنطاق مفاتيح المرور بعد. أعد المحاولة لاحقاً.');
+    } on PasskeyUnsupportedException {
+      throw const PasskeyAuthException('هذا الجهاز لا يدعم مفاتيح المرور. يلزم Android 9 أو أحدث مع قفل شاشة.');
     }
   }
 
