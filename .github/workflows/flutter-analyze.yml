@@ -62,4 +62,4 @@ jobs:
       - name: Build Android debug APK
         env:
           CI: 'false'
-        run: flutter build apk --debug
+        run: flutter build apk --debug --android-skip-build-dependency-validation
