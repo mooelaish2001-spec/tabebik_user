@@ -17,7 +17,8 @@ service cloud.firestore {
         && phoneNumber() != null
         && exists(/databases/$(database)/documents/centerMembers/$(phoneNumber()))
         && get(/databases/$(database)/documents/centerMembers/$(phoneNumber())).data.centerId == centerId
-        && get(/databases/$(database)/documents/centerMembers/$(phoneNumber())).data.active == true;
+        && get(/databases/$(database)/documents/centerMembers/$(phoneNumber())).data.active == true
+        && get(/databases/$(database)/documents/centerMembers/$(phoneNumber())).data.uid == request.auth.uid;
     }
 
     function centerManager(centerId) {
@@ -39,6 +40,12 @@ service cloud.firestore {
         && lic != ''
         && exists(/databases/$(database)/documents/doctors/$(lic))
         && get(/databases/$(database)/documents/doctors/$(lic)).data.uid == request.auth.uid;
+    }
+
+    function doctorPasskeyOwner(lic) {
+      return signedIn()
+        && request.auth.token.get('role', null) == 'doctor'
+        && request.auth.token.get('professionalId', null) == lic;
     }
 
     function doctorPhoneOwner(lic) {
@@ -156,6 +163,7 @@ service cloud.firestore {
       allow create: if signedIn() && (
         (
           request.resource.data.uid == request.auth.uid
+          && doctorPasskeyOwner(lic)
           && request.resource.data.verified == false
           && getAfter(/databases/$(database)/documents/doctorKeys/$(lic)).data.phone == phoneNumber()
         )
@@ -194,6 +202,7 @@ service cloud.firestore {
       allow create: if signedIn() && (
         (
           request.resource.data.phone == phoneNumber()
+          && doctorPasskeyOwner(lic)
           && request.resource.data.createdBy == ''
         )
         || (
