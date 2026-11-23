@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'package:passkeys/authenticator.dart';
+import 'package:passkeys/exceptions.dart';
 import 'package:passkeys/types.dart';
 
 /// Passkey-only authentication backed by server-verified WebAuthn ceremonies.
@@ -74,13 +75,7 @@ class PasskeyAuthService {
     final options = Map<String, dynamic>.from(start['options'] as Map);
     final challenge = start['challenge'] as String;
 
-    final platformCredential = await _authenticator.authenticate(
-      AuthenticateRequestType.fromJson(
-        options,
-        mediation: MediationType.Optional,
-        preferImmediatelyAvailableCredentials: false,
-      ),
-    );
+    final platformCredential = await _authenticate(options);
     final raw = platformCredential.toJson();
     final credential = <String, dynamic>{
       'id': raw['id'],
@@ -101,6 +96,23 @@ class PasskeyAuthService {
       'credential': credential,
     });
     return _signInWithToken(finish);
+  }
+
+  Future<AuthenticateResponseType> _authenticate(Map<String, dynamic> options) async {
+    try {
+      return await _authenticator.authenticate(
+        AuthenticateRequestType.fromJson(
+          options,
+          mediation: MediationType.Optional,
+          preferImmediatelyAvailableCredentials: false,
+        ),
+      );
+    } on NoCredentialsAvailableException {
+      throw const PasskeyAuthException(
+        'لا يوجد مفتاح مرور محفوظ لهذا الحساب على الجهاز أو حساب Google.',
+        code: 'passkey-not-found',
+      );
+    }
   }
 
   Future<UserCredential> _signInWithToken(Map<String, dynamic> response) async {
