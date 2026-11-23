@@ -5,13 +5,10 @@ import 'package:http/http.dart' as http;
 import 'package:passkeys/authenticator.dart';
 import 'package:passkeys/types.dart';
 
-/// Client for the Firebase WebAuthn endpoints.
-///
-/// The server verifies every ceremony and returns a Firebase Custom Token.
-/// This class intentionally exposes patient registration only: doctor and
-/// center enrollment must first be bound to their licence/approval workflows.
+/// Passkey-only authentication backed by server-verified WebAuthn ceremonies.
 class PasskeyAuthService {
   PasskeyAuthService({
+    required this.app,
     FirebaseAuth? firebaseAuth,
     http.Client? httpClient,
     PasskeyAuthenticator? authenticator,
@@ -21,14 +18,18 @@ class PasskeyAuthService {
 
   static const String _baseUrl =
       'https://us-central1-tabibek-2f25e.cloudfunctions.net';
-  static const String _app = 'tabebik_user';
 
+  final String app;
   final FirebaseAuth _firebaseAuth;
   final http.Client _http;
   final PasskeyAuthenticator _authenticator;
 
-  Future<UserCredential> registerPatient({
+  Map<String, dynamic> accountData = {};
+
+  Future<UserCredential> registerAccount({
     required String displayName,
+    String phone = '',
+    String professionalId = '',
   }) async {
     final name = displayName.trim();
     if (name.isEmpty || name.length > 80) {
@@ -36,8 +37,10 @@ class PasskeyAuthService {
     }
 
     final start = await _post('passkeyRegisterOptions', {
-      'app': _app,
+      'app': app,
       'displayName': name,
+      'phone': phone,
+      'professionalId': professionalId,
     });
     final options = Map<String, dynamic>.from(start['options'] as Map);
     final challenge = options['challenge'] as String;
@@ -46,8 +49,6 @@ class PasskeyAuthService {
       RegisterRequestType.fromJson(options),
     );
     final raw = platformCredential.toJson();
-    // Convert the Flutter plugin's flattened response to the standard
-    // PublicKeyCredential JSON shape expected by SimpleWebAuthn.
     final credential = <String, dynamic>{
       'id': raw['id'],
       'rawId': raw['rawId'],
@@ -61,16 +62,15 @@ class PasskeyAuthService {
     };
 
     final finish = await _post('passkeyRegisterVerify', {
-      'app': _app,
+      'app': app,
       'challenge': challenge,
-      'displayName': name,
-      'credential': credential.toJson(),
+      'credential': credential,
     });
     return _signInWithToken(finish);
   }
 
   Future<UserCredential> signIn() async {
-    final start = await _post('passkeyLoginOptions', {'app': _app});
+    final start = await _post('passkeyLoginOptions', {'app': app});
     final options = Map<String, dynamic>.from(start['options'] as Map);
     final challenge = start['challenge'] as String;
 
@@ -96,18 +96,20 @@ class PasskeyAuthService {
     };
 
     final finish = await _post('passkeyLoginVerify', {
-      'app': _app,
+      'app': app,
       'challenge': challenge,
-      'credential': credential.toJson(),
+      'credential': credential,
     });
     return _signInWithToken(finish);
   }
 
-  Future<UserCredential> _signInWithToken(Map<String, dynamic> response) {
+  Future<UserCredential> _signInWithToken(Map<String, dynamic> response) async {
     final token = response['customToken'];
     if (token is! String || token.isEmpty) {
       throw const PasskeyAuthException('لم يرجع الخادم رمز تسجيل دخول صالحاً.');
     }
+    final account = response['account'];
+    accountData = account is Map ? Map<String, dynamic>.from(account) : {};
     return _firebaseAuth.signInWithCustomToken(token);
   }
 
@@ -121,21 +123,19 @@ class PasskeyAuthService {
           headers: const {'Content-Type': 'application/json'},
           body: jsonEncode(body),
         )
-        .timeout(const Duration(seconds: 25));
+        .timeout(const Duration(seconds: 30));
 
     Map<String, dynamic> data = {};
     try {
       final decoded = jsonDecode(response.body);
       if (decoded is Map) data = Map<String, dynamic>.from(decoded);
     } on FormatException {
-      // A non-JSON response is handled below as a generic server error.
+      // Non-JSON responses are reported as a generic service failure below.
     }
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final code = data['error'];
-      throw PasskeyAuthException(
-        _messageFor(code is String ? code : 'unknown'),
-      );
+      throw PasskeyAuthException(_messageFor(code is String ? code : 'unknown'));
     }
     return data;
   }
@@ -145,13 +145,15 @@ class PasskeyAuthService {
       case 'rate-limited':
         return 'محاولات كثيرة. انتظر قليلاً ثم أعد المحاولة.';
       case 'passkey-not-found':
-        return 'لا يوجد مفتاح مرور لهذا الحساب على هذا الجهاز أو حساب Google.';
+        return 'لم نعثر على مفتاح مرور لهذا الحساب. إذا كانت هذه أول مرة، اختر إنشاء حساب.';
+      case 'professional-account-claim-required':
+        return 'هذا الرقم المهني مرتبط بملف سابق. يلزم مراجعة الدعم لربط الحساب بأمان.';
       case 'professional-verification-required':
-        return 'تسجيل الطبيب والمركز يحتاج إلى إكمال التحقق المهني أولاً.';
+        return 'يتطلب هذا الحساب مراجعة بياناته المهنية قبل تفعيله.';
       case 'challenge-expired':
         return 'انتهت مهلة العملية. أعد المحاولة.';
       default:
-        return 'تعذر إكمال تسجيل الدخول بالمفتاح. حاول مرة أخرى.';
+        return 'تعذر إكمال العملية بالمفتاح. تأكد من اتصال الإنترنت وإعداد قفل الجهاز.';
     }
   }
 
@@ -160,9 +162,7 @@ class PasskeyAuthService {
 
 class PasskeyAuthException implements Exception {
   const PasskeyAuthException(this.message);
-
   final String message;
-
   @override
   String toString() => message;
 }
