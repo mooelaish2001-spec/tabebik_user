@@ -240,7 +240,7 @@ export const passkeyRegisterVerify = onRequest({ region: REGION, cors: false, ma
       displayName,
       app,
     };
-    const token = await auth.createCustomToken(challengeData.uid, { role: account.role, authMethod: "passkey" });
+    const token = await auth.createCustomToken(challengeData.uid, { role: account.role, authMethod: "passkey", accountPhone: account.phone, professionalId: account.professionalId });
     return send(res, 200, { verified: true, uid: challengeData.uid, customToken: token, account });
   } catch (error) {
     console.error("passkeyRegisterVerify failed", error);
@@ -319,7 +319,7 @@ export const passkeyLoginVerify = onRequest({ region: REGION, cors: false, maxIn
     });
     const account = await db.collection("passkeyAccounts").doc(stored.uid).get();
     if (!account.exists || account.data().status !== "active") return send(res, 403, { error: "account-disabled" });
-    const token = await auth.createCustomToken(stored.uid, { role: account.data().role, authMethod: "passkey" });
+    const token = await auth.createCustomToken(stored.uid, { role: account.data().role, authMethod: "passkey", accountPhone: account.data().phone ?? "", professionalId: account.data().professionalId ?? "" });
     return send(res, 200, {
       verified: true,
       uid: stored.uid,
