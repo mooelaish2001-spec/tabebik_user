@@ -76,10 +76,21 @@ service cloud.firestore {
         && request.resource.data.status == 0;
 
       allow update: if centerManager(centerId)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'name', 'kind', 'city', 'hood', 'address', 'phone', 'from', 'to',
-          'hours', 'daysText', 'svc', 'licensePath', 'updatedAt'
-        ]);
+        && (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'name', 'kind', 'city', 'hood', 'address', 'phone', 'from', 'to',
+            'hours', 'daysText', 'svc', 'licensePath', 'updatedAt'
+          ])
+          || (
+            resource.data.status == 2
+            && request.resource.data.status == 0
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'name', 'kind', 'city', 'hood', 'address', 'phone', 'from', 'to',
+              'hours', 'daysText', 'svc', 'licensePath', 'updatedAt', 'status',
+              'reqNo', 'reason'
+            ])
+          )
+        );
 
       allow delete: if false;
 
