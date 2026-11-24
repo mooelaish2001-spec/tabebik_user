@@ -2933,7 +2933,7 @@ String fmtTime(int m) {
 }
 
 /// بيانات العرض التجريبية (حجوزات وعناوين وعائلة...). للإنتاج: --dart-define=DEMO_DATA=false
-const kDemoData = bool.fromEnvironment('DEMO_DATA', defaultValue: true);
+const kDemoData = bool.fromEnvironment('DEMO_DATA', defaultValue: false);
 
 // ───────────────────────── تخزين الجهاز (تسجيل مرة واحدة كالواتساب) ─────────────────────────
 abstract class StoreBackend {
