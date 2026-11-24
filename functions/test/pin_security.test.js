@@ -11,19 +11,19 @@ test("PIN accepts exactly six ASCII digits", () => {
   assert.equal(validPin(123456), false);
 });
 
-test("PIN hash is salted and verifies only the correct PIN", () => {
-  const first = hashPin("012345");
-  const second = hashPin("012345");
+test("PIN hash is salted and verifies only the correct PIN", async () => {
+  const first = await hashPin("012345");
+  const second = await hashPin("012345");
   assert.notEqual(first.pinSalt, second.pinSalt);
   assert.notEqual(first.pinHash, second.pinHash);
-  assert.equal(verifyPin("012345", first), true);
-  assert.equal(verifyPin("999999", first), false);
-  assert.equal(verifyPin("012345", { pinSalt: "bad", pinHash: "bad" }), false);
+  assert.equal(await verifyPin("012345", first), true);
+  assert.equal(await verifyPin("999999", first), false);
+  assert.equal(await verifyPin("012345", { pinSalt: "bad", pinHash: "bad" }), false);
 });
 
-test("invalid PIN values cannot be hashed", () => {
-  assert.throws(() => hashPin("12345"), TypeError);
-  assert.throws(() => hashPin("abcdef"), TypeError);
+test("invalid PIN values cannot be hashed", async () => {
+  await assert.rejects(() => hashPin("12345"), TypeError);
+  await assert.rejects(() => hashPin("abcdef"), TypeError);
 });
 
 test("fifth consecutive failure locks PIN for fifteen minutes", () => {
