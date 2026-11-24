@@ -34,7 +34,10 @@ class PasskeyAuthService {
     String phone = '',
     String professionalId = '',
   }) async {
-    if (!RegExp(r'^\\d{6}
+    if (pin.length != 6 || !pin.codeUnits.every((c) => c >= 48 && c <= 57)) {
+      throw const PasskeyAuthException('أدخل PIN صحيحاً من 6 أرقام.');
+    }
+    //
     final name = displayName.trim();
     if (name.isEmpty || name.length > 80) {
       throw const PasskeyAuthException('أدخل اسماً صحيحاً.');
@@ -91,7 +94,10 @@ class PasskeyAuthService {
   }
 
   Future<UserCredential> signIn({required String pin}) async {
-    if (!RegExp(r'^\\d{6}
+    if (pin.length != 6 || !pin.codeUnits.every((c) => c >= 48 && c <= 57)) {
+      throw const PasskeyAuthException('أدخل PIN صحيحاً من 6 أرقام.');
+    }
+    //
     final start = await _post('passkeyLoginOptions', {'app': app});
     final options = Map<String, dynamic>.from(start['options'] as Map);
     final challenge = start['challenge'] as String;
