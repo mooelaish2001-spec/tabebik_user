@@ -1,31 +1,33 @@
+import com.android.build.api.dsl.ApplicationExtension
+import com.flutter.gradle.FlutterExtension
+import org.gradle.api.JavaVersion
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id("com.android.application")
-    id("kotlin-android")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
+    // AGP 9 provides built-in Kotlin; do not apply kotlin-android.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-android {
+val flutterExtension = extensions.getByType<FlutterExtension>()
+
+extensions.configure<ApplicationExtension>("android") {
     namespace = "com.tabebik.tabebik_user"
-    compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    compileSdk = flutterExtension.compileSdkVersion
+    ndkVersion = flutterExtension.ndkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
 
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_11.toString()
-    }
-
     defaultConfig {
         applicationId = "com.tabebik.tabebik_user"
-        // Android Credential Manager passkeys require Android 9 (API 28) or higher.
-        minSdk = maxOf(flutter.minSdkVersion, 28)
-        targetSdk = flutter.targetSdkVersion
-        versionCode = flutter.versionCode
-        versionName = flutter.versionName
+        // Preserve the existing passkey-compatible minimum API level.
+        minSdk = maxOf(flutterExtension.minSdkVersion, 28)
+        targetSdk = flutterExtension.targetSdkVersion
+        versionCode = flutterExtension.versionCode
+        versionName = flutterExtension.versionName
     }
 
     signingConfigs {
@@ -50,8 +52,7 @@ android {
     }
 
     buildTypes {
-        release {
-            // Use the uploaded Codemagic keystore in CI; keep debug signing for local testing.
+        getByName("release") {
             signingConfig = if (System.getenv("CI") == "true") {
                 signingConfigs.getByName("release")
             } else {
@@ -61,6 +62,11 @@ android {
     }
 }
 
+kotlin {
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_11
+    }
+}
 
 flutter {
     source = "../.."
