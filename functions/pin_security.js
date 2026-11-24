@@ -4,7 +4,7 @@ const KEY_LENGTH = 64;
 const SCRYPT_OPTIONS = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 
 export function validPin(value) {
-  return typeof value === "string" && /^\\d{6}$/.test(value);
+  return typeof value === "string" && /^\d{6}$/.test(value);
 }
 
 export function hashPin(pin, salt = randomBytes(16)) {
