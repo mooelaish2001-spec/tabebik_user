@@ -3173,7 +3173,7 @@ class _LoginState extends State<LoginScreen> {
       err = null;
     });
     try {
-      await passkey.signIn(pin: await requestSecurityPin(context));
+      await passkey.signIn(requestPin: () => requestSecurityPin(context));
       final accountPhone = (passkey.accountData['phone'] ?? '').toString();
       if (accountPhone != phone) {
         await Fb.signOut();
