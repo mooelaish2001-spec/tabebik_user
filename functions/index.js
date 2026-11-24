@@ -281,7 +281,7 @@ export const passkeyRegisterVerify = onRequest({ region: REGION, cors: false, ma
       displayName,
       app,
     };
-    const token = await auth.createCustomToken(challengeData.uid, { role: account.role, authMethod: "passkey", accountPhone: account.phone, professionalId: account.professionalId });
+    const token = await auth.createCustomToken(challengeData.uid, { role: account.role, authMethod: "passkey+pin", accountPhone: account.phone, professionalId: account.professionalId });
     return send(res, 200, { verified: true, uid: challengeData.uid, customToken: token, account });
   } catch (error) {
     console.error("passkeyRegisterVerify failed", error);
