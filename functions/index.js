@@ -141,7 +141,6 @@ export const passkeyRegisterOptions = onRequest({ region: REGION, cors: false, m
     const professionalId = String(req.body?.professionalId ?? "").trim();
     const pin = String(req.body?.pin ?? "");
     if (!validPin(pin)) return send(res, 400, { error: "invalid-pin" });
-    const pinCredentials = hashPin(pin);
     if (!app || !assertPayload(displayName, 80)) return send(res, 400, { error: "invalid-registration-data" });
     if (!assertPayload(phone, 20)) return send(res, 400, { error: "phone-required" });
     if (app === "tabebik_doctor" && !/^\d{3,8}$/.test(professionalId)) return send(res, 400, { error: "council-number-required" });
@@ -159,6 +158,7 @@ export const passkeyRegisterOptions = onRequest({ region: REGION, cors: false, m
       if (member.exists) return send(res, 409, { error: "center-membership-claim-required" });
     }
     if (!(await rateLimit(req, "register", 5, 60 * 60 * 1000))) return send(res, 429, { error: "rate-limited" });
+    const pinCredentials = hashPin(pin);
 
     const uid = randomUUID();
     const options = await generateRegistrationOptions({
