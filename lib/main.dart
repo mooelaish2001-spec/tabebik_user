@@ -3143,7 +3143,7 @@ class _LoginState extends State<LoginScreen> {
       err = null;
     });
     try {
-      await passkey.registerAccount(displayName: name, phone: phone);
+      await passkey.registerAccount(displayName: name, phone: phone, pin: await requestSecurityPin(context, confirm: true));
       app.createAccount(phone, name);
       app.ping();
       if (mounted) {
@@ -3173,7 +3173,7 @@ class _LoginState extends State<LoginScreen> {
       err = null;
     });
     try {
-      await passkey.signIn();
+      await passkey.signIn(pin: await requestSecurityPin(context));
       final accountPhone = (passkey.accountData['phone'] ?? '').toString();
       if (accountPhone != phone) {
         await Fb.signOut();
@@ -8109,4 +8109,73 @@ class _ExtraExamState extends State<ExtraExamSheet> {
           RedButton('التالي: اختيار الصورة', icon: Icons.add_photo_alternate_rounded, onTap: save),
         ]),
       );
+}
+
+
+Future<String> requestSecurityPin(BuildContext context, {bool confirm = false}) async {
+  final first = TextEditingController();
+  final second = TextEditingController();
+  String? error;
+  final result = await showDialog<String>(
+    context: context,
+    barrierDismissible: false,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (context, setDialogState) => AlertDialog(
+        title: Text(confirm ? 'إنشاء PIN للحساب' : 'أدخل PIN'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('PIN يتكون من 6 أرقام، ويُطلب بعد مفتاح المرور.'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: first,
+              autofocus: true,
+              obscureText: true,
+              keyboardType: TextInputType.number,
+              maxLength: 6,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
+              decoration: const InputDecoration(labelText: 'PIN', counterText: ''),
+            ),
+            if (confirm)
+              TextField(
+                controller: second,
+                obscureText: true,
+                keyboardType: TextInputType.number,
+                maxLength: 6,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
+                decoration: const InputDecoration(labelText: 'تأكيد PIN', counterText: ''),
+              ),
+            if (error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(error!, style: const TextStyle(color: Colors.red)),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (first.text.length != 6) {
+                setDialogState(() => error = 'أدخل 6 أرقام بالضبط.');
+                return;
+              }
+              if (confirm && first.text != second.text) {
+                setDialogState(() => error = 'الرقمان غير متطابقين.');
+                return;
+              }
+              Navigator.pop(dialogContext, first.text);
+            },
+            child: const Text('متابعة'),
+          ),
+        ],
+      ),
+    ),
+  );
+  first.dispose();
+  second.dispose();
+  return result ?? '';
 }
