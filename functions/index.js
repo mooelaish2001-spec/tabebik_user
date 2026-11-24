@@ -147,7 +147,7 @@ export const passkeyRegisterOptions = onRequest({ region: REGION, cors: false, m
       if (member.exists) return send(res, 409, { error: "center-membership-claim-required" });
     }
     if (!(await rateLimit(req, "register", 5, 60 * 60 * 1000))) return send(res, 429, { error: "rate-limited" });
-    const pinCredentials = hashPin(pin);
+    const pinCredentials = await hashPin(pin);
 
     const uid = randomUUID();
     const options = await generateRegistrationOptions({
@@ -393,7 +393,7 @@ export const passkeyPinVerify = onRequest({ region: REGION, cors: false, maxInst
     if (!accountSnap.exists || accountSnap.data().status !== "active") return send(res, 403, { error: "account-disabled" });
     const account = accountSnap.data();
     if (Number(account.pinLockedUntil ?? 0) > Date.now()) return send(res, 429, { error: "pin-locked" });
-    if (!verifyPin(pin, account)) {
+    if (!(await verifyPin(pin, account))) {
       const failure = await db.runTransaction(async (tx) => {
         const [ticketNow, current] = await Promise.all([tx.get(ticketRef), tx.get(accountRef)]);
         if (!ticketNow.exists || ticketNow.data().consumed || ticketNow.data().expiresAt.toMillis() < Date.now()) return "ticket-used";
