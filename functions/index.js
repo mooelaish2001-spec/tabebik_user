@@ -1,4 +1,5 @@
-import { randomUUID, createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { randomUUID, createHash, randomBytes } from "node:crypto";
+import { validPin, hashPin, verifyPin, nextPinFailure } from "./pin_security.js";
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
@@ -90,18 +91,6 @@ async function rateLimit(req, action, max, windowMs) {
   });
 }
 
-function validPin(value) { return typeof value === "string" && /^\d{6}$/.test(value); }
-function hashPin(pin, salt = randomBytes(16)) {
-  const derived = scryptSync(pin, salt, 64, { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
-  return { pinSalt: salt.toString("base64"), pinHash: derived.toString("base64") };
-}
-function verifyPin(pin, account) {
-  try {
-    const expected = Buffer.from(account.pinHash, "base64");
-    const actual = scryptSync(pin, Buffer.from(account.pinSalt, "base64"), 64, { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
-    return expected.length === actual.length && timingSafeEqual(expected, actual);
-  } catch { return false; }
-}
 function assertPayload(value, max = 100) {
   return typeof value === "string" && value.trim().length > 0 && value.length <= max;
 }
@@ -405,25 +394,32 @@ export const passkeyPinVerify = onRequest({ region: REGION, cors: false, maxInst
     const account = accountSnap.data();
     if (Number(account.pinLockedUntil ?? 0) > Date.now()) return send(res, 429, { error: "pin-locked" });
     if (!verifyPin(pin, account)) {
-      await db.runTransaction(async (tx) => {
-        const current = await tx.get(accountRef);
-        const data = current.data() ?? {};
-        const attempts = Number(data.pinAttempts ?? 0) + 1;
-        tx.update(accountRef, {
-          pinAttempts: attempts >= 5 ? 0 : attempts,
-          pinLockedUntil: attempts >= 5 ? Date.now() + 15 * 60 * 1000 : Number(data.pinLockedUntil ?? 0),
-        });
-        tx.set(ticketRef, { consumed: true, consumedAt: FieldValue.serverTimestamp() }, { merge: true });
+      const failure = await db.runTransaction(async (tx) => {
+        const [ticketNow, current] = await Promise.all([tx.get(ticketRef), tx.get(accountRef)]);
+        if (!ticketNow.exists || ticketNow.data().consumed || ticketNow.data().expiresAt.toMillis() < Date.now()) return "ticket-used";
+        if (!current.exists || current.data().status !== "active") return "account-disabled";
+        const data = current.data();
+        if (Number(data.pinLockedUntil ?? 0) > Date.now()) return "pin-locked";
+        const next = nextPinFailure(data.pinAttempts ?? 0);
+        tx.update(accountRef, { pinAttempts: next.pinAttempts, pinLockedUntil: next.pinLockedUntil });
+        tx.update(ticketRef, { consumed: true, consumedAt: FieldValue.serverTimestamp() });
+        return next.locked ? "pin-locked" : "invalid-pin";
       });
+      if (failure === "ticket-used") return send(res, 401, { error: "login-ticket-expired" });
+      if (failure === "account-disabled") return send(res, 403, { error: "account-disabled" });
+      if (failure === "pin-locked") return send(res, 429, { error: "pin-locked" });
       return send(res, 401, { error: "invalid-pin" });
     }
-    await db.runTransaction(async (tx) => {
+    const authenticated = await db.runTransaction(async (tx) => {
       const [ticketNow, accountNow] = await Promise.all([tx.get(ticketRef), tx.get(accountRef)]);
-      if (!ticketNow.exists || ticketNow.data().consumed || ticketNow.data().expiresAt.toMillis() < Date.now()) throw new Error("ticket-used");
-      if (!accountNow.exists || accountNow.data().status !== "active" || Number(accountNow.data().pinLockedUntil ?? 0) > Date.now()) throw new Error("account-locked");
+      if (!ticketNow.exists || ticketNow.data().consumed || ticketNow.data().expiresAt.toMillis() < Date.now()) return false;
+      if (!accountNow.exists || accountNow.data().status !== "active" || Number(accountNow.data().pinLockedUntil ?? 0) > Date.now()) return false;
+      if (accountNow.data().pinHash !== account.pinHash || accountNow.data().pinSalt !== account.pinSalt) return false;
       tx.update(ticketRef, { consumed: true, consumedAt: FieldValue.serverTimestamp() });
       tx.update(accountRef, { pinAttempts: 0, pinLockedUntil: 0, lastLoginAt: FieldValue.serverTimestamp() });
+      return true;
     });
+    if (!authenticated) return send(res, 401, { error: "login-ticket-expired" });
     const token = await auth.createCustomToken(ticketData.uid, {
       role: account.role, authMethod: "passkey+pin",
       accountPhone: account.phone ?? "", professionalId: account.professionalId ?? "",
