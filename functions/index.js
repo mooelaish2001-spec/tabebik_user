@@ -129,7 +129,7 @@ export const passkeyRegisterOptions = onRequest({ region: REGION, cors: false, m
     const professionalId = String(req.body?.professionalId ?? "").trim();
     if (!app || !assertPayload(displayName, 80)) return send(res, 400, { error: "invalid-registration-data" });
     if (!assertPayload(phone, 20)) return send(res, 400, { error: "phone-required" });
-    if (app === "tabebik_doctor" && !/^\\d{3,8}$/.test(professionalId)) return send(res, 400, { error: "council-number-required" });
+    if (app === "tabebik_doctor" && !/^\d{3,8}$/.test(professionalId)) return send(res, 400, { error: "council-number-required" });
     // Never allow a passkey-only user to take over a pre-existing professional
     // record created by a center. Those claims require a manual identity review.
     if (app === "tabebik_doctor") {
@@ -317,7 +317,7 @@ export const passkeyLoginVerify = onRequest({ region: REGION, cors: false, maxIn
     const verification = await verifyAuthenticationResponse({
       response,
       expectedChallenge: challengeData.challenge,
-      expectedOrigin: ORIGIN,
+      expectedOrigin: EXPECTED_ORIGINS,
       expectedRPID: RP_ID,
       credential: {
         id: stored.credentialId,
