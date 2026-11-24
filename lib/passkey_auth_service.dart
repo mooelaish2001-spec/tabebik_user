@@ -92,10 +92,7 @@ class PasskeyAuthService {
     return _signInWithToken(finish);
   }
 
-  Future<UserCredential> signIn({required String pin}) async {
-    if (pin.length != 6 || !pin.codeUnits.every((c) => c >= 48 && c <= 57)) {
-      throw const PasskeyAuthException('أدخل PIN صحيحاً من 6 أرقام.');
-    }
+  Future<UserCredential> signIn({required Future<String> Function() requestPin}) async {
     final start = await _post('passkeyLoginOptions', {'app': app});
     final options = Map<String, dynamic>.from(start['options'] as Map);
     final challenge = start['challenge'] as String;
@@ -123,6 +120,10 @@ class PasskeyAuthService {
     final ticket = passkeyResult['loginTicket'];
     if (ticket is! String || ticket.isEmpty) {
       throw const PasskeyAuthException('لم يكتمل التحقق من مفتاح المرور.');
+    }
+    final pin = await requestPin();
+    if (pin.length != 6 || !pin.codeUnits.every((c) => c >= 48 && c <= 57)) {
+      throw const PasskeyAuthException('أدخل PIN صحيحاً من 6 أرقام.');
     }
     final finish = await _post('passkeyPinVerify', {
       'app': app,
