@@ -38,7 +38,7 @@ workflows:
           if [ ! -f android/gradlew ] || [ ! -f android/gradle/wrapper/gradle-wrapper.jar ]; then
             echo "Gradle Wrapper is incomplete. Generating wrapper files..."
 
-            WRAPPER_VERSION="9.5.0"
+            WRAPPER_VERSION="9.3.1"
             TEMP_DIR="$(mktemp -d)"
             mkdir -p "$TEMP_DIR/wrapper-project"
 
@@ -49,6 +49,7 @@ workflows:
             unzip -q "$TEMP_DIR/gradle.zip" -d "$TEMP_DIR"
 
             "$TEMP_DIR/gradle-${WRAPPER_VERSION}/bin/gradle" \
+              --no-daemon \
               -p "$TEMP_DIR/wrapper-project" \
               wrapper --gradle-version "$WRAPPER_VERSION" --distribution-type all
 
@@ -58,6 +59,8 @@ workflows:
             cp "$TEMP_DIR/wrapper-project/gradle/wrapper/gradle-wrapper.properties" android/gradle/wrapper/
             chmod +x android/gradlew
 
+            # Stop any bootstrap daemon before deleting its temporary Gradle installation.
+            "$TEMP_DIR/gradle-${WRAPPER_VERSION}/bin/gradle" --stop >/dev/null 2>&1 || true
             rm -rf "$TEMP_DIR"
           fi
 
