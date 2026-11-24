@@ -59,6 +59,10 @@ jobs:
         working-directory: functions
         run: npm run lint
 
+      - name: Test PIN security helpers
+        working-directory: functions
+        run: npm test
+
       - name: Build Android debug APK
         env:
           CI: 'false'
