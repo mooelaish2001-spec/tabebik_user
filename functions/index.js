@@ -348,7 +348,9 @@ export const passkeyLoginVerify = onRequest({ region: REGION, cors: false, maxIn
       tx.update(credentialDoc.ref, { counter: newCounter, lastUsedAt: FieldValue.serverTimestamp() });
     });
     const account = await db.collection("passkeyAccounts").doc(stored.uid).get();
+    const expectedRole = app === "tabebik_user" ? "patient" : app === "tabebik_doctor" ? "doctor" : "center";
     if (!account.exists || account.data().status !== "active") return send(res, 403, { error: "account-disabled" });
+    if (account.data().app !== app || account.data().role !== expectedRole) return send(res, 403, { error: "passkey-app-mismatch" });
     if (!account.data().pinHash || !account.data().pinSalt) return send(res, 403, { error: "pin-setup-required" });
     const loginTicket = randomBytes(32).toString("base64url");
     const ticketId = createHash("sha256").update(loginTicket).digest("hex");
@@ -392,6 +394,8 @@ export const passkeyPinVerify = onRequest({ region: REGION, cors: false, maxInst
     const accountSnap = await accountRef.get();
     if (!accountSnap.exists || accountSnap.data().status !== "active") return send(res, 403, { error: "account-disabled" });
     const account = accountSnap.data();
+    const expectedRole = app === "tabebik_user" ? "patient" : app === "tabebik_doctor" ? "doctor" : "center";
+    if (account.app !== app || account.role !== expectedRole) return send(res, 403, { error: "passkey-app-mismatch" });
     if (Number(account.pinLockedUntil ?? 0) > Date.now()) return send(res, 429, { error: "pin-locked" });
     if (!(await verifyPin(pin, account))) {
       const failure = await db.runTransaction(async (tx) => {
