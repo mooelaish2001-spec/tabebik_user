@@ -1,4 +1,4 @@
-import { randomUUID, createHash } from "node:crypto";
+import { randomUUID, createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
@@ -90,14 +90,26 @@ async function rateLimit(req, action, max, windowMs) {
   });
 }
 
+function validPin(value) { return typeof value === "string" && /^\d{6}$/.test(value); }
+function hashPin(pin, salt = randomBytes(16)) {
+  const derived = scryptSync(pin, salt, 64, { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
+  return { pinSalt: salt.toString("base64"), pinHash: derived.toString("base64") };
+}
+function verifyPin(pin, account) {
+  try {
+    const expected = Buffer.from(account.pinHash, "base64");
+    const actual = scryptSync(pin, Buffer.from(account.pinSalt, "base64"), 64, { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
+    return expected.length === actual.length && timingSafeEqual(expected, actual);
+  } catch { return false; }
+}
 function assertPayload(value, max = 100) {
   return typeof value === "string" && value.trim().length > 0 && value.length <= max;
 }
 
-async function saveChallenge({ challenge, uid, type, app, displayName = "", phone = "", professionalId = "" }) {
+async function saveChallenge({ challenge, uid, type, app, displayName = "", phone = "", professionalId = "", pinSalt = "", pinHash = "" }) {
   const ref = db.collection("passkeyChallenges").doc(challenge);
   await ref.create({
-    challenge, uid, type, app, displayName, phone, professionalId,
+    challenge, uid, type, app, displayName, phone, professionalId, pinSalt, pinHash,
     createdAt: FieldValue.serverTimestamp(),
     expiresAt: Timestamp.fromMillis(Date.now() + CHALLENGE_TTL_MS),
     consumed: false,
@@ -127,6 +139,9 @@ export const passkeyRegisterOptions = onRequest({ region: REGION, cors: false, m
     const displayName = String(req.body?.displayName ?? "").trim();
     const phone = String(req.body?.phone ?? "").trim();
     const professionalId = String(req.body?.professionalId ?? "").trim();
+    const pin = String(req.body?.pin ?? "");
+    if (!validPin(pin)) return send(res, 400, { error: "invalid-pin" });
+    const pinCredentials = hashPin(pin);
     if (!app || !assertPayload(displayName, 80)) return send(res, 400, { error: "invalid-registration-data" });
     if (!assertPayload(phone, 20)) return send(res, 400, { error: "phone-required" });
     if (app === "tabebik_doctor" && !/^\d{3,8}$/.test(professionalId)) return send(res, 400, { error: "council-number-required" });
@@ -161,7 +176,7 @@ export const passkeyRegisterOptions = onRequest({ region: REGION, cors: false, m
       },
       timeout: CHALLENGE_TTL_MS,
     });
-    await saveChallenge({ challenge: options.challenge, uid, type: "registration", app, displayName, phone, professionalId });
+    await saveChallenge({ challenge: options.challenge, uid, type: "registration", app, displayName, phone, professionalId, ...pinCredentials });
     return send(res, 200, { uid, options });
   } catch (error) {
     console.error("passkeyRegisterOptions failed", error);
@@ -241,6 +256,10 @@ export const passkeyRegisterVerify = onRequest({ region: REGION, cors: false, ma
         displayName: String(challengeData.displayName ?? "").trim().slice(0, 80),
         phone: String(challengeData.phone ?? ""),
         professionalId: String(challengeData.professionalId ?? ""),
+        pinSalt: challengeData.pinSalt,
+        pinHash: challengeData.pinHash,
+        pinAttempts: 0,
+        pinLockedUntil: 0,
         app,
         status: "active",
         createdAt: FieldValue.serverTimestamp(),
@@ -341,11 +360,16 @@ export const passkeyLoginVerify = onRequest({ region: REGION, cors: false, maxIn
     });
     const account = await db.collection("passkeyAccounts").doc(stored.uid).get();
     if (!account.exists || account.data().status !== "active") return send(res, 403, { error: "account-disabled" });
-    const token = await auth.createCustomToken(stored.uid, { role: account.data().role, authMethod: "passkey", accountPhone: account.data().phone ?? "", professionalId: account.data().professionalId ?? "" });
+    if (!account.data().pinHash || !account.data().pinSalt) return send(res, 403, { error: "pin-setup-required" });
+    const loginTicket = randomBytes(32).toString("base64url");
+    const ticketId = createHash("sha256").update(loginTicket).digest("hex");
+    await db.collection("pendingPinLogins").doc(ticketId).create({
+      uid: stored.uid, app, createdAt: FieldValue.serverTimestamp(),
+      expiresAt: Timestamp.fromMillis(Date.now() + 2 * 60 * 1000), consumed: false,
+    });
     return send(res, 200, {
       verified: true,
-      uid: stored.uid,
-      customToken: token,
+      loginTicket,
       account: {
         role: account.data().role,
         phone: account.data().phone ?? "",
@@ -357,5 +381,63 @@ export const passkeyLoginVerify = onRequest({ region: REGION, cors: false, maxIn
   } catch (error) {
     console.error("passkeyLoginVerify failed", error);
     return send(res, 401, { error: "passkey-authentication-failed" });
+  }
+});
+
+
+export const passkeyPinVerify = onRequest({ region: REGION, cors: false, maxInstances: 30 }, async (req, res) => {
+  try {
+    if (!validPost(req, res)) return;
+    const app = getApp(req);
+    const ticket = String(req.body?.loginTicket ?? "");
+    const pin = String(req.body?.pin ?? "");
+    if (!app || !/^[A-Za-z0-9_-]{40,60}$/.test(ticket) || !validPin(pin)) return send(res, 400, { error: "invalid-pin-request" });
+    if (!(await rateLimit(req, "pin-verify", 20, 15 * 60 * 1000))) return send(res, 429, { error: "rate-limited" });
+    const ticketId = createHash("sha256").update(ticket).digest("hex");
+    const ticketRef = db.collection("pendingPinLogins").doc(ticketId);
+    const ticketSnap = await ticketRef.get();
+    if (!ticketSnap.exists) return send(res, 401, { error: "login-ticket-expired" });
+    const ticketData = ticketSnap.data();
+    if (ticketData.app !== app || ticketData.consumed || ticketData.expiresAt.toMillis() < Date.now()) return send(res, 401, { error: "login-ticket-expired" });
+    const accountRef = db.collection("passkeyAccounts").doc(ticketData.uid);
+    const accountSnap = await accountRef.get();
+    if (!accountSnap.exists || accountSnap.data().status !== "active") return send(res, 403, { error: "account-disabled" });
+    const account = accountSnap.data();
+    if (Number(account.pinLockedUntil ?? 0) > Date.now()) return send(res, 429, { error: "pin-locked" });
+    if (!verifyPin(pin, account)) {
+      await db.runTransaction(async (tx) => {
+        const current = await tx.get(accountRef);
+        const data = current.data() ?? {};
+        const attempts = Number(data.pinAttempts ?? 0) + 1;
+        tx.update(accountRef, {
+          pinAttempts: attempts >= 5 ? 0 : attempts,
+          pinLockedUntil: attempts >= 5 ? Date.now() + 15 * 60 * 1000 : Number(data.pinLockedUntil ?? 0),
+        });
+        tx.set(ticketRef, { consumed: true, consumedAt: FieldValue.serverTimestamp() }, { merge: true });
+      });
+      return send(res, 401, { error: "invalid-pin" });
+    }
+    await db.runTransaction(async (tx) => {
+      const [ticketNow, accountNow] = await Promise.all([tx.get(ticketRef), tx.get(accountRef)]);
+      if (!ticketNow.exists || ticketNow.data().consumed || ticketNow.data().expiresAt.toMillis() < Date.now()) throw new Error("ticket-used");
+      if (!accountNow.exists || accountNow.data().status !== "active" || Number(accountNow.data().pinLockedUntil ?? 0) > Date.now()) throw new Error("account-locked");
+      tx.update(ticketRef, { consumed: true, consumedAt: FieldValue.serverTimestamp() });
+      tx.update(accountRef, { pinAttempts: 0, pinLockedUntil: 0, lastLoginAt: FieldValue.serverTimestamp() });
+    });
+    const token = await auth.createCustomToken(ticketData.uid, {
+      role: account.role, authMethod: "passkey+pin",
+      accountPhone: account.phone ?? "", professionalId: account.professionalId ?? "",
+    });
+    return send(res, 200, {
+      verified: true, uid: ticketData.uid, customToken: token,
+      account: {
+        role: account.role, phone: account.phone ?? "",
+        professionalId: account.professionalId ?? "",
+        displayName: account.displayName ?? "", app: account.app,
+      },
+    });
+  } catch (error) {
+    console.error("passkeyPinVerify failed", error);
+    return send(res, 401, { error: "pin-authentication-failed" });
   }
 });
