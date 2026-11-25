@@ -20,7 +20,9 @@ import 'package:google_fonts/google_fonts.dart';
 // ═════════════════════════════════════════════════════════════════════════
 
 // ───────────────────────── Design tokens ─────────────────────────
-const bool kPasskeyAuthEnabled = false; // TEMP: local demo mode; set true to restore Passkey + PIN.\n\nconst kRed = Color(0xFFD9141E);
+const bool kPasskeyAuthEnabled = false; // TEMP: local demo mode; set true to restore Passkey + PIN.
+
+const kRed = Color(0xFFD9141E);
 const kInk = Color(0xFF1B2A4A);
 const kGrey = Color(0xFF7B8494);
 const kSub = Color(0xFF4B5873);
@@ -5224,7 +5226,9 @@ class SuccessScreen extends StatelessWidget {
             ),
             Text('تم إرسال طلب الحجز بنجاح', style: t(21)),
             gap(10),
-            Text(a.payState == 'later' ? 'سيتم مراجعة طلبك من قبل المركز.\nبعد تأكيده يصلك رقم حساب المركز لتحويل المبلغ وإرسال إشعار التحويل.' : 'سيتم مراجعة طلبك من قبل المركز،\nوسيتم إشعارك بمجرد التأكيد.', textAlign: TextAlign.center, style: t(13, w: FontWeight.w500, c: const Color(0xFF6B7794), h: 1.7)),
+            Text(a.payState == 'later' ? 'سيتم مراجعة طلبك من قبل المركز.
+بعد تأكيده يصلك رقم حساب المركز لتحويل المبلغ وإرسال إشعار التحويل.' : 'سيتم مراجعة طلبك من قبل المركز،
+وسيتم إشعارك بمجرد التأكيد.', textAlign: TextAlign.center, style: t(13, w: FontWeight.w500, c: const Color(0xFF6B7794), h: 1.7)),
             gap(22),
             Container(
               width: double.infinity,
@@ -7269,7 +7273,9 @@ class PrescriptionsScreen extends StatelessWidget {
               for (final m in r.$3) Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [const Padding(padding: EdgeInsets.only(top: 6), child: Icon(Icons.circle, size: 7, color: kRed)), gapW(10), Expanded(child: Text(m, style: t(12.5, w: FontWeight.w500, c: kSub, h: 1.6)))])),
               gap(10),
               OutBtn('نسخ الوصفة', icon: Icons.content_copy_rounded, height: 42, onTap: () {
-                Clipboard.setData(ClipboardData(text: '${r.$1}\n${r.$3.join('\n')}'));
+                Clipboard.setData(ClipboardData(text: '${r.$1}
+${r.$3.join('
+')}'));
                 snack(context, 'تم نسخ الوصفة', ok: true);
               }),
             ]),
@@ -7322,7 +7328,8 @@ class LabResultsScreen extends StatelessWidget {
   Widget build(BuildContext context) => RedPage(
         title: 'نتائج التحاليل',
         bottomBar: btnBar(context, 'تحميل PDF', () => fakeDownload(context, 'نتائج التحاليل'), icon: Icons.download_rounded, alt: 'مشاركة (نسخ)', onAlt: () {
-          Clipboard.setData(ClipboardData(text: rows.map((r) => '${r.$1}: ${r.$2} ${r.$3} (${r.$4})').join('\n')));
+          Clipboard.setData(ClipboardData(text: rows.map((r) => '${r.$1}: ${r.$2} ${r.$3} (${r.$4})').join('
+')));
           snack(context, 'تم نسخ النتائج للمشاركة', ok: true);
         }),
         body: ListView(padding: const EdgeInsets.all(16), children: [
