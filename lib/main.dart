@@ -3195,7 +3195,7 @@ class _LoginState extends State<LoginScreen> {
   Future<void> signIn() async {
     if (busy) return;
     FocusScope.of(context).unfocus();
-    if (!Fb.on) {
+    if (kPasskeyAuthEnabled && !Fb.on) {
       setState(() => err = 'لا يوجد اتصال بخدمة الحسابات. تأكد من الإنترنت ثم حاول مجدداً.');
       return;
     }
