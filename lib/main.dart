@@ -4,7 +4,6 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/cupertino.dart' show CupertinoPicker;
 import 'tabibak_firebase.dart';
-import 'passkey_auth_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -21,7 +20,7 @@ import 'package:google_fonts/google_fonts.dart';
 // ═════════════════════════════════════════════════════════════════════════
 
 // ───────────────────────── Design tokens ─────────────────────────
-const kRed = Color(0xFFD9141E);
+const bool kPasskeyAuthEnabled = false; // TEMP: local demo mode; set true to restore Passkey + PIN.\n\nconst kRed = Color(0xFFD9141E);
 const kInk = Color(0xFF1B2A4A);
 const kGrey = Color(0xFF7B8494);
 const kSub = Color(0xFF4B5873);
@@ -3117,7 +3116,6 @@ class LoginScreen extends StatefulWidget {
 class _LoginState extends State<LoginScreen> {
   final ph = TextEditingController();
   final nm = TextEditingController();
-  final passkey = PasskeyAuthService(app: 'tabebik_user');
   late bool signInMode = widget.startWithSignIn;
   String? nameErr, phoneErr, err;
   bool busy = false, done = false;
@@ -3127,7 +3125,6 @@ class _LoginState extends State<LoginScreen> {
   void dispose() {
     ph.dispose();
     nm.dispose();
-    passkey.close();
     super.dispose();
   }
 
