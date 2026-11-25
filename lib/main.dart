@@ -3170,9 +3170,15 @@ class _LoginState extends State<LoginScreen> {
     }
     setState(() => busy = true);
     try {
-      // 1) PIN (مرتين)  2) إنشاء مفتاح المرور على الجهاز.
+      if (!kPasskeyAuthEnabled) {
+        // TEMP demo: local account only; no Passkey or PIN ceremony.
+        app.createAccount(phone, name);
+        app.ping();
+        await celebrate('تم إنشاء حساب تجريبي', 'أهلاً بك يا ${app.first}، يمكنك الآن تجربة التطبيق.');
+        return;
+      }
       final pin = await requestSecurityPin(context, confirm: true);
-      if (pin.isEmpty) return; // أغلق المستخدم نافذة PIN ← لا نُنشئ شيئاً.
+      if (pin.isEmpty) return;
       await passkey.registerAccount(displayName: name, phone: phone, pin: pin);
       app.createAccount(phone, name);
       app.ping();
@@ -3196,7 +3202,15 @@ class _LoginState extends State<LoginScreen> {
       err = null;
     });
     try {
-      // المفتاح نفسه يحدد الحساب؛ لا حاجة لكتابة رقم الهاتف.
+      if (!kPasskeyAuthEnabled) {
+        app.restore();
+        if (!app.registered) {
+          setState(() => err = 'لا يوجد حساب تجريبي محفوظ على هذا الجهاز. اختر «حساب جديد» أولاً.');
+          return;
+        }
+        await celebrate('أهلاً بعودتك', app.first);
+        return;
+      }
       await passkey.signIn(requestPin: () {
         if (!mounted) return Future.value('');
         return requestSecurityPin(context);
