@@ -3166,7 +3166,7 @@ class _LoginState extends State<LoginScreen> {
       err = null;
     });
     if (nameErr != null || phone == null) return;
-    if (!Fb.on) {
+    if (kPasskeyAuthEnabled && !Fb.on) {
       setState(() => err = 'لا يوجد اتصال بخدمة الحسابات. تأكد من الإنترنت ثم حاول مجدداً.');
       return;
     }
