@@ -1154,7 +1154,7 @@ class MapPage extends StatelessWidget {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Fb.init();
-  if (Fb.on) {
+  if (Fb.on && kPasskeyAuthEnabled) {
     // Firebase: جلسة الدخول تُحفظ على الجهاز تلقائياً (كالواتساب)، والكتالوج والحجوزات مباشرة من Firestore.
     kPhotoPicker = (camera) => Fb.pickImage(camera: camera);
     app.clearDemo();
